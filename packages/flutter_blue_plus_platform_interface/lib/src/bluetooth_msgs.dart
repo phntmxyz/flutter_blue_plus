@@ -1016,6 +1016,128 @@ class PhySupport {
   }
 }
 
+class L2CapChannelConnected {
+  final DeviceIdentifier remoteId;
+  final int psm;
+
+  L2CapChannelConnected.fromMap(Map<dynamic, dynamic> map)
+      : remoteId = DeviceIdentifier(map['remote_id']),
+        psm = map['psm'];
+}
+
+class ListenL2CapChannelRequest {
+  final bool secure;
+
+  ListenL2CapChannelRequest({required this.secure});
+
+  Map<dynamic, dynamic> toMap() {
+    return {
+      'secure': secure,
+    };
+  }
+}
+
+class ListenL2CapChannelResponse {
+  final int psm;
+
+  ListenL2CapChannelResponse.fromMap(Map<dynamic, dynamic> map) : psm = map['psm'];
+}
+
+class StopListenL2CapChannelRequest {
+  final int psm;
+
+  StopListenL2CapChannelRequest({required this.psm});
+
+  Map<dynamic, dynamic> toMap() {
+    return {
+      'psm': psm,
+    };
+  }
+}
+
+class OpenL2CapChannelRequest {
+  final String remoteId;
+  final int psm;
+  final bool secure;
+
+  OpenL2CapChannelRequest({
+    required this.remoteId,
+    required this.psm,
+    required this.secure,
+  });
+
+  Map<dynamic, dynamic> toMap() {
+    return {
+      'psm': psm,
+      'remote_id': remoteId,
+      'secure': secure,
+    };
+  }
+}
+
+class CloseL2CapChannelRequest {
+  final String remoteId;
+  final int psm;
+
+  CloseL2CapChannelRequest({
+    required this.remoteId,
+    required this.psm,
+  });
+
+  Map<dynamic, dynamic> toMap() {
+    return {
+      'psm': psm,
+      'remote_id': remoteId,
+    };
+  }
+}
+
+class ReadL2CapChannelRequest {
+  final String remoteId;
+  final int psm;
+
+  ReadL2CapChannelRequest({
+    required this.remoteId,
+    required this.psm,
+  });
+
+  Map<dynamic, dynamic> toMap() {
+    return {
+      'psm': psm,
+      'remote_id': remoteId,
+    };
+  }
+}
+
+class ReadL2CapChannelResponse {
+  final String remoteId;
+  final int psm;
+  final int bytesRead;
+  final List<int> value;
+
+  ReadL2CapChannelResponse.fromMap(Map<dynamic, dynamic> map)
+      : remoteId = map['remote_id'],
+        psm = map['psm'],
+        bytesRead = map['bytes_read'],
+        value = Uint8List.fromList(map['value']);
+}
+
+class WriteL2CapChannelRequest {
+  final String remoteId;
+  final int psm;
+  final List<int> value;
+
+  WriteL2CapChannelRequest({required this.remoteId, required this.psm, required this.value});
+
+  Map<dynamic, dynamic> toMap() {
+    return {
+      'psm': psm,
+      'remote_id': remoteId,
+      'value': Uint8List.fromList(value),
+    };
+  }
+}
+
 // random number defined by flutter blue plus.
 // Ideally it should not conflict with iOS or Android error codes.
 int bmUserCanceledErrorCode = 23789258;

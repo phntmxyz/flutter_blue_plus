@@ -95,6 +95,12 @@ abstract base class FlutterBluePlusPlatform {
     return Future.value(false);
   }
 
+  Future<void> closeL2CapChannel(
+    CloseL2CapChannelRequest request,
+  ) {
+    throw UnimplementedError();
+  }
+
   Future<bool> connect(
     BmConnectRequest request,
   ) {
@@ -188,6 +194,18 @@ abstract base class FlutterBluePlusPlatform {
     return Future.value(false);
   }
 
+  Future<void> listenL2CapChannel(
+    ListenL2CapChannelRequest request,
+  ) {
+    throw UnimplementedError();
+  }
+
+  Future<void> openL2CapChannel(
+    OpenL2CapChannelRequest request,
+  ) {
+    throw UnimplementedError();
+  }
+
   Future<bool> readCharacteristic(
     BmReadCharacteristicRequest request,
   ) {
@@ -198,6 +216,12 @@ abstract base class FlutterBluePlusPlatform {
     BmReadDescriptorRequest request,
   ) {
     return Future.value(false);
+  }
+
+  Future<List<int>> readL2CapChannel(
+    ReadL2CapChannelRequest request,
+  ) {
+    throw UnimplementedError();
   }
 
   Future<bool> readRssi(
@@ -254,6 +278,12 @@ abstract base class FlutterBluePlusPlatform {
     return Future.value(false);
   }
 
+  Future<void> stopListenL2CapChannel(
+    StopListenL2CapChannelRequest request,
+  ) {
+    throw UnimplementedError();
+  }
+
   Future<bool> stopScan(
     BmStopScanRequest request,
   ) {
@@ -282,5 +312,11 @@ abstract base class FlutterBluePlusPlatform {
     BmWriteDescriptorRequest request,
   ) {
     return Future.value(false);
+  }
+
+  Future<void> writeL2CapChannel(
+    WriteL2CapChannelRequest request,
+  ) {
+    throw UnimplementedError();
   }
 }

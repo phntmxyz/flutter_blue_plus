@@ -3224,7 +3224,7 @@ class L2CapChannelManager {
             return;
         }
         if (!adapter.isEnabled()) {
-            LogLevel.DEBUG.log("Bluetooth is disabled. Please enable first.");
+            log(LogLevel.DEBUG, "Bluetooth is disabled. Please enable first.");
             resultCallback.error(ErrorCodes.BLUETOOTH_TURNED_OFF, "Bluetooth is turned off.", null);
             return;
         }
@@ -3245,7 +3245,7 @@ class L2CapChannelManager {
             resultCallback.success(response.marshal());
 
         } catch (IOException e) {
-            LogLevel.ERROR.log(e.getMessage(), e);
+            log(LogLevel.ERROR, e.getMessage());
             resultCallback.error(ErrorCodes.OPEN_L2CAP_CHANNEL_FAILED, e.getMessage(), e);
         }
 
@@ -3263,7 +3263,7 @@ class L2CapChannelManager {
 
         L2CapInfo l2CapInfo = findInfo(psm);
         if (l2CapInfo == null) {
-            LogLevel.DEBUG.log("L2CAP Channel with for device " + device.getAddress() + " / psm " + psm + " not open yet. Create channel.");
+            log(LogLevel.DEBUG, "L2CAP Channel with for device " + device.getAddress() + " / psm " + psm + " not open yet. Create channel.");
             l2CapInfo = new ClientSocketInfo(new L2CapClientChannel(device, psm));
             openL2CapChannelInfos.add(l2CapInfo);
         }
@@ -3316,14 +3316,14 @@ class L2CapChannelManager {
             try {
                 channelInfo.close(device);
             } catch (IOException e) {
-                LogLevel.ERROR.log(e.getMessage(), e);
+                log(LogLevel.ERROR, e.getMessage());
                 resultCallback.error(ErrorCodes.CLOSE_L2CAP_CHANNEL_FAILED, "Can't close channel with psm " + psm, null);
             }
             if (channelInfo.getType() == L2CapInfo.Type.CLIENT) {
                 openL2CapChannelInfos.remove(channelInfo);
             }
         } else {
-            LogLevel.DEBUG.log("No channel found which is matching device " + device.getAddress() + " / psm " + psm);
+            log(LogLevel.DEBUG, "No channel found which is matching device " + device.getAddress() + " / psm " + psm);
         }
         resultCallback.success(null);
     }
@@ -3335,7 +3335,7 @@ class L2CapChannelManager {
             ((ServerSocketInfo) channelInfo).closeSocket();
             openL2CapChannelInfos.remove(channelInfo);
         } else {
-            LogLevel.DEBUG.log("No server socket found with psm " + psm);
+            log(LogLevel.DEBUG, "No server socket found with psm " + psm);
         }
         resultCallback.success(null);
     }
@@ -3402,7 +3402,7 @@ abstract class L2CapChannel {
             final ReadL2CapChannelResponse response = new ReadL2CapChannelResponse(request.remoteId, request.psm, bytesRead, readBuffer);
             resultCallback.success(response.marshal());
         } catch (IOException e) {
-            LogLevel.ERROR.log(e.getMessage(), e);
+            log(LogLevel.ERROR, e.getMessage());
             resultCallback.error(ErrorCodes.INPUT_STREAM_READ_FAILED, e.getMessage(), e);
         }
     }
@@ -3417,7 +3417,7 @@ abstract class L2CapChannel {
             outputStream.write(data);
             resultCallback.success(null);
         } catch (IOException e) {
-            LogLevel.ERROR.log(e.getMessage(), e);
+            log(LogLevel.ERROR, e.getMessage());
             resultCallback.error(ErrorCodes.OUTPUT_STREAM_WRITE_FAILED, e.getMessage(), e);
         }
     }
@@ -3427,7 +3427,7 @@ abstract class L2CapChannel {
             try {
                 outputStream.close();
             } catch (IOException e) {
-                LogLevel.ERROR.log(e.getMessage(), e);
+                log(LogLevel.ERROR, e.getMessage());
             } finally {
                 outputStream = null;
             }
@@ -3436,7 +3436,7 @@ abstract class L2CapChannel {
             try {
                 inputStream.close();
             } catch (IOException e) {
-                LogLevel.ERROR.log(e.getMessage(), e);
+                log(LogLevel.ERROR, e.getMessage());
             } finally {
                 inputStream = null;
             }
@@ -3445,7 +3445,7 @@ abstract class L2CapChannel {
             try {
                 socket.close();
             } catch (IOException e) {
-                LogLevel.ERROR.log(e.getMessage(), e);
+                log(LogLevel.ERROR, e.getMessage());
             } finally {
                 socket = null;
             }
@@ -3482,7 +3482,7 @@ class L2CapClientChannel extends L2CapChannel {
             outputStream = socket.getOutputStream();
             resultCallback.success(null);
         } catch (IOException e) {
-            LogLevel.ERROR.log(e.getMessage(), e);
+            log(LogLevel.ERROR, e.getMessage());
             resultCallback.error(ErrorCodes.OPEN_L2CAP_CHANNEL_FAILED, e.getMessage(), e);
         }
     }
@@ -3510,7 +3510,7 @@ class L2CapServerChannel extends L2CapChannel {
 
     @TargetApi(Build.VERSION_CODES.Q)
     public synchronized void openStreams() throws IOException {
-        LogLevel.DEBUG.log("Opening streams");
+        log(LogLevel.DEBUG, "Opening streams");
         inputStream = socket.getInputStream();
         outputStream = socket.getOutputStream();
     }
@@ -4188,43 +4188,5 @@ interface ErrorCodes {
     String NO_PERMISSION = "no_permissions";
 }
 
-
-enum LogLevel {
-    NONE((tag, message, throwable) -> {
-        // Do nothing
-    }),    // 0
-    ERROR(Log::e),   // 1
-    WARNING(Log::w), // 2
-    INFO(Log::i),    // 3
-    DEBUG(Log::d),   // 4
-    VERBOSE(Log::v); // 5
-
-    private static final String TAG = "[FBP-Android]";
-    private static LogLevel LOG_LEVEL = LogLevel.DEBUG;
-    private final LogImplementation logImplementation;
-
-    LogLevel(final LogImplementation logImplementation) {
-        this.logImplementation = logImplementation;
-    }
-
-    public static void setLogLevel(final LogLevel logLevel) {
-        LOG_LEVEL = logLevel;
-    }
-
-    public void log(final String message) {
-        log(message, null);
-    }
-
-    public void log(final String message, final Throwable throwable) {
-        if (ordinal() <= LOG_LEVEL.ordinal()) {
-            logImplementation.log(TAG, String.format("[FBP] %s", message), throwable);
-        }
-    }
-
-    private interface LogImplementation {
-        void log(final String tag, final String message, final Throwable throwable);
-    }
-
-}
 
 

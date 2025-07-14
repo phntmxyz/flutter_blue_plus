@@ -119,6 +119,13 @@ final class FlutterBluePlusAndroid extends FlutterBluePlusPlatform {
   }
 
   @override
+  Future<void> closeL2CapChannel(
+    CloseL2CapChannelRequest request,
+  ) async {
+    await _invokeMethod('closeL2CapChannel', request.toMap());
+  }
+
+  @override
   Future<bool> connect(
     BmConnectRequest request,
   ) async {
@@ -235,6 +242,20 @@ final class FlutterBluePlusAndroid extends FlutterBluePlusPlatform {
   }
 
   @override
+  Future<void> listenL2CapChannel(
+    ListenL2CapChannelRequest request,
+  ) async {
+    return await _invokeMethod('listenL2CapChannel', request.toMap());
+  }
+
+  @override
+  Future<void> openL2CapChannel(
+      OpenL2CapChannelRequest request,
+      ) async {
+    return await _invokeMethod('openL2CapChannel', request.toMap());
+  }
+
+  @override
   Future<bool> readCharacteristic(
     BmReadCharacteristicRequest request,
   ) async {
@@ -252,6 +273,18 @@ final class FlutterBluePlusAndroid extends FlutterBluePlusPlatform {
       'readDescriptor',
       request.toMap(),
     ) == true;
+  }
+
+  @override
+  Future<List<int>> readL2CapChannel(
+    ReadL2CapChannelRequest request,
+  ) async {
+    return await _invokeMethod('readL2CapChannel', request.toMap())
+        .then((buffer) => ReadL2CapChannelResponse.fromMap(buffer))
+        .then((readChannelResponse) {
+      return readChannelResponse.value
+          .sublist(0, readChannelResponse.bytesRead);
+    });
   }
 
   @override
@@ -348,6 +381,13 @@ final class FlutterBluePlusAndroid extends FlutterBluePlusPlatform {
   }
 
   @override
+  Future<void> stopListenL2CapChannel(
+    StopListenL2CapChannelRequest request,
+  ) async {
+    return await _invokeMethod('stopListenL2capChannel', request.toMap());
+  }
+
+  @override
   Future<bool> stopScan(
     BmStopScanRequest request,
   ) async {
@@ -392,6 +432,13 @@ final class FlutterBluePlusAndroid extends FlutterBluePlusPlatform {
       'writeDescriptor',
       request.toMap(),
     ) == true;
+  }
+
+  @override
+  Future<void> writeL2CapChannel(
+    WriteL2CapChannelRequest request,
+  ) async {
+    await _invokeMethod('writeL2CapChannel', request.toMap());
   }
 
   Future<T?> _invokeMethod<T>(

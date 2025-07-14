@@ -5,6 +5,7 @@
 package com.lib.flutter_blue_plus;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.Application;
@@ -15,6 +16,8 @@ import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
+import android.bluetooth.BluetoothServerSocket;
+import android.bluetooth.BluetoothSocket;
 import android.bluetooth.BluetoothStatusCodes;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
@@ -38,10 +41,15 @@ import android.provider.Settings;
 import android.util.Log;
 import android.util.SparseArray;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -61,6 +69,7 @@ import java.nio.charset.StandardCharsets;
 import java.lang.reflect.Method;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -120,6 +129,13 @@ public class FlutterBluePlusPlugin implements
     private int lastEventId = 1452;
 
     private final int enableBluetoothRequestCode = 13106;
+
+    private L2CapChannelManager l2CapChannelManager;
+
+    private final L2CapChannelManager.DeviceConnected deviceConnectedCallback = (remoteDevice, psm) -> {
+        final DeviceConnectedToL2CapChannel newConnectedDeviceState = new DeviceConnectedToL2CapChannel(remoteDevice, psm);
+        invokeMethodUIThread(L2CapMethodNames.DEVICE_CONNECTED, newConnectedDeviceState.marshal());
+    };
 
     private interface OperationOnPermission {
         void op(boolean granted, String permission);
@@ -242,6 +258,7 @@ public class FlutterBluePlusPlugin implements
 
         mBluetoothAdapter = null;
         mBluetoothManager = null;
+        l2CapChannelManager = null;
     }
 
     @Override
@@ -316,6 +333,9 @@ public class FlutterBluePlusPlugin implements
                 "getAdapterState".equals(call.method) == false) {
                 result.error("bluetoothUnavailable", "the device does not support bluetooth", null);
                 return;
+            }
+            if (l2CapChannelManager == null) {
+                l2CapChannelManager = new L2CapChannelManager(mBluetoothAdapter, deviceConnectedCallback);
             }
 
             switch (call.method) {
@@ -1498,6 +1518,102 @@ public class FlutterBluePlusPlugin implements
                     result.success(true);
                     break;
                 }
+                case "openL2CapChannel": {
+                    ArrayList<String> permissions = new ArrayList<>();
+                    if (Build.VERSION.SDK_INT >= 31) { // Android 12 (October 2021)
+                        permissions.add(Manifest.permission.BLUETOOTH_CONNECT);
+                    }
+                    if (Build.VERSION.SDK_INT <= 30) { // Android 11 (September 2020)
+                        permissions.add(Manifest.permission.BLUETOOTH);
+                    }
+                    ensurePermissions(permissions, (granted, permission) -> {
+                        if (!granted) {
+                            result.error(
+                                    "connectToL2CapChannel", String.format("flutter_blue plugin requires %s for new connection", permission), null);
+                            return;
+                        }
+                        final Map<String, Object> data = call.arguments();
+                        final OpenL2CapChannelRequest options = OpenL2CapChannelRequest.unmarshal(data);
+                        l2CapChannelManager.openL2CapChannel(options, result);
+                    });
+                    break;
+                }
+                case "closeL2CapChannel":
+                {
+                    ArrayList<String> permissions = new ArrayList<>();
+                    if (Build.VERSION.SDK_INT >= 31) { // Android 12 (October 2021)
+                        permissions.add(Manifest.permission.BLUETOOTH_CONNECT);
+                    }
+                    if (Build.VERSION.SDK_INT <= 30) { // Android 11 (September 2020)
+                        permissions.add(Manifest.permission.BLUETOOTH);
+                    }
+                    ensurePermissions(permissions, (granted, perm) -> {
+                        if (!granted) {
+                            result.error("closeL2CapChannel", String.format("Permission %s required for new connection", perm), null);
+                            return;
+                        }
+                        final Map<String, Object> data = call.arguments();
+                        final CloseL2CapChannelRequest request = CloseL2CapChannelRequest.unmarshal(data);
+                        l2CapChannelManager.closeChannel(request, result);
+                    });
+                    break;
+                }
+                case "readL2CapChannel":
+                {
+                    final Map<String, Object> data = call.arguments();
+                    final ReadL2CapChannelRequest options = ReadL2CapChannelRequest.unmarshal(data);
+                    l2CapChannelManager.read(options, result);
+                    break;
+                }
+                case "writeL2CapChannel":
+                {
+                    final Map<String, Object> data = call.arguments();
+                    final WriteL2CapChannelRequest options = WriteL2CapChannelRequest.unmarshal(data);
+                    l2CapChannelManager.write(options, result);
+                    break;
+                }
+                case "listenL2capChannel":
+                {
+                    ArrayList<String> permissions = new ArrayList<>();
+                    if (Build.VERSION.SDK_INT >= 31) { // Android 12 (October 2021)
+                        permissions.add(Manifest.permission.BLUETOOTH_CONNECT);
+                    }
+
+                    if (Build.VERSION.SDK_INT <= 30) { // Android 11 (September 2020)
+                        permissions.add(Manifest.permission.BLUETOOTH);
+                    }
+                    ensurePermissions(permissions, (granted, perm) -> {
+                        if (!granted) {
+                            result.error("listenL2capChannel", String.format("Permission %s required for new connection", perm), null);
+                            return;
+                        }
+                        final Map<String, Object> data = call.arguments();
+                        final ListenL2CapChannelRequest options = ListenL2CapChannelRequest.unmarshal(data);
+                        l2CapChannelManager.listenUsingL2capChannel(options, result);
+                    });
+                    break;
+                }
+                case "stopListenL2capChannel":
+                {
+                    ArrayList<String> permissions = new ArrayList<>();
+                    if (Build.VERSION.SDK_INT >= 31) { // Android 12 (October 2021)
+                        permissions.add(Manifest.permission.BLUETOOTH_CONNECT);
+                    }
+                    if (Build.VERSION.SDK_INT <= 30) { // Android 11 (September 2020)
+                        permissions.add(Manifest.permission.BLUETOOTH);
+                    }
+                    ensurePermissions(permissions, (granted, permission) -> {
+                        if (!granted) {
+                            result.error(
+                                    "closeL2CapServer", String.format("flutter_blue plugin requires %s for listening to l2cap channel", permission), null);
+                            return;
+                        }
+                        final Map<String, Object> data = call.arguments();
+                        CloseL2CapServer options = CloseL2CapServer.unmarshal(data);
+                        l2CapChannelManager.closeServerSocket(options, result);
+                    });
+                    break;
+                }
 
                 default:
                 {
@@ -1673,7 +1789,7 @@ public class FlutterBluePlusPlugin implements
 
     private ChrFound locateCharacteristic(BluetoothGatt gatt,
                                                  String serviceUuid,
-                                                 String characteristicUuid, 
+                                                 String characteristicUuid,
                                                  String primaryServiceUuid,
                                                  Integer characteristicInstanceId)
     {
@@ -2692,7 +2808,7 @@ public class FlutterBluePlusPlugin implements
     }
 
     HashMap<String, Object> bmBluetoothService(
-        BluetoothDevice device, 
+        BluetoothDevice device,
         BluetoothGattService service,
         BluetoothGattService primaryService,
         BluetoothGatt gatt)
@@ -3088,3 +3204,1027 @@ public class FlutterBluePlusPlugin implements
         VERBOSE  // 5
     }
 }
+
+
+@TargetApi(Build.VERSION_CODES.Q)
+class L2CapChannelManager {
+    private final BluetoothAdapter adapter;
+    private final DeviceConnected deviceConnectedCallback;
+    private final List<L2CapInfo> openL2CapChannelInfos = Collections.synchronizedList(new LinkedList<>());
+
+    public L2CapChannelManager(@NonNull final BluetoothAdapter adapter, @NonNull final DeviceConnected deviceConnectedCallback) {
+        this.adapter = adapter;
+        this.deviceConnectedCallback = deviceConnectedCallback;
+    }
+
+    @SuppressLint("MissingPermission")
+    public synchronized void listenUsingL2capChannel(ListenL2CapChannelRequest request, final Result resultCallback) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            firePlatformNotSupportedError(resultCallback);
+            return;
+        }
+        if (!adapter.isEnabled()) {
+            LogLevel.DEBUG.log("Bluetooth is disabled. Please enable first.");
+            resultCallback.error(ErrorCodes.BLUETOOTH_TURNED_OFF, "Bluetooth is turned off.", null);
+            return;
+        }
+
+        try {
+            final BluetoothServerSocket serverSocket;
+            if (request.secure) {
+                serverSocket = adapter.listenUsingL2capChannel();
+            } else {
+                serverSocket = adapter.listenUsingInsecureL2capChannel();
+            }
+            final ServerSocketInfo socketInfo = new ServerSocketInfo(serverSocket, deviceConnectedCallback);
+            openL2CapChannelInfos.add(socketInfo);
+            final int psm = serverSocket.getPsm();
+            socketInfo.acceptConnections();
+
+            final ListenL2CapChannelResponse response = new ListenL2CapChannelResponse(psm);
+            resultCallback.success(response.marshal());
+
+        } catch (IOException e) {
+            LogLevel.ERROR.log(e.getMessage(), e);
+            resultCallback.error(ErrorCodes.OPEN_L2CAP_CHANNEL_FAILED, e.getMessage(), e);
+        }
+
+    }
+
+    public synchronized void openL2CapChannel(final OpenL2CapChannelRequest request, final Result resultCallback) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            firePlatformNotSupportedError(resultCallback);
+            return;
+        }
+        final String deviceId = request.remoteId;
+        final BluetoothDevice device = adapter.getRemoteDevice(deviceId);
+        final int psm = request.psm;
+        final boolean secure = request.secure;
+
+        L2CapInfo l2CapInfo = findInfo(psm);
+        if (l2CapInfo == null) {
+            LogLevel.DEBUG.log("L2CAP Channel with for device " + device.getAddress() + " / psm " + psm + " not open yet. Create channel.");
+            l2CapInfo = new ClientSocketInfo(new L2CapClientChannel(device, psm));
+            openL2CapChannelInfos.add(l2CapInfo);
+        }
+        final L2CapClientChannel l2CapChannel = ((L2CapClientChannel) l2CapInfo.getL2CapChannel(device));
+        l2CapChannel.connectToL2CapChannel(secure, resultCallback);
+    }
+
+    public void read(final ReadL2CapChannelRequest request, final Result resultCallback) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            firePlatformNotSupportedError(resultCallback);
+            return;
+        }
+        final String deviceId = request.remoteId;
+        final BluetoothDevice device = adapter.getRemoteDevice(deviceId);
+        final int psm = request.psm;
+        final L2CapChannel channel = findChannel(psm, device);
+        if (channel == null) {
+            resultCallback.error(ErrorCodes.NO_OPEN_L2CAP_CHANNEL_FOUND, "No open channel found for device " + device.getAddress() + " / psm " + psm, null);
+            return;
+        }
+        channel.read(request, resultCallback);
+    }
+
+    public void write(final WriteL2CapChannelRequest request, final Result resultCallback) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            firePlatformNotSupportedError(resultCallback);
+            return;
+        }
+        final String deviceId = request.remoteId;
+        final BluetoothDevice device = adapter.getRemoteDevice(deviceId);
+        final int psm = request.psm;
+        final L2CapChannel channel = findChannel(psm, device);
+        if (channel == null) {
+            resultCallback.error(ErrorCodes.NO_OPEN_L2CAP_CHANNEL_FOUND, "No open channel found for device " + device.getAddress() + " / psm " + psm, null);
+            return;
+        }
+        channel.write(request, resultCallback);
+    }
+
+    public synchronized void closeChannel(final CloseL2CapChannelRequest request, final Result resultCallback) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            firePlatformNotSupportedError(resultCallback);
+            return;
+        }
+        final String deviceId = request.remoteId;
+        final BluetoothDevice device = adapter.getRemoteDevice(deviceId);
+        final int psm = request.psm;
+        final L2CapInfo channelInfo = findInfo(psm);
+        if (channelInfo != null) {
+            try {
+                channelInfo.close(device);
+            } catch (IOException e) {
+                LogLevel.ERROR.log(e.getMessage(), e);
+                resultCallback.error(ErrorCodes.CLOSE_L2CAP_CHANNEL_FAILED, "Can't close channel with psm " + psm, null);
+            }
+            if (channelInfo.getType() == L2CapInfo.Type.CLIENT) {
+                openL2CapChannelInfos.remove(channelInfo);
+            }
+        } else {
+            LogLevel.DEBUG.log("No channel found which is matching device " + device.getAddress() + " / psm " + psm);
+        }
+        resultCallback.success(null);
+    }
+
+    public synchronized void closeServerSocket(CloseL2CapServer options, final Result resultCallback) {
+        final int psm = options.psm;
+        final L2CapInfo channelInfo = findInfo(psm);
+        if (channelInfo != null && channelInfo.getType() == L2CapInfo.Type.SERVER) {
+            ((ServerSocketInfo) channelInfo).closeSocket();
+            openL2CapChannelInfos.remove(channelInfo);
+        } else {
+            LogLevel.DEBUG.log("No server socket found with psm " + psm);
+        }
+        resultCallback.success(null);
+    }
+
+    private void firePlatformNotSupportedError(Result resultCallback) {
+        resultCallback.error("platform_not_supported", "The device is running an older Android version. Minimum version is Android Q.", null);
+    }
+
+    @Nullable
+    private L2CapInfo findInfo(final int psm) {
+        for (L2CapInfo channelInfo : openL2CapChannelInfos) {
+            if (psm == channelInfo.getPsm()) {
+                return channelInfo;
+            }
+        }
+        return null;
+    }
+
+    @Nullable
+    private L2CapChannel findChannel(final int psm, final BluetoothDevice remoteDevice) {
+        final L2CapInfo l2CapInfo = findInfo(psm);
+        if (l2CapInfo == null) {
+            return null;
+        }
+        return l2CapInfo.getL2CapChannel(remoteDevice);
+    }
+
+
+    public interface DeviceConnected {
+        void deviceConnected(BluetoothDevice remoteDevice, int psm);
+    }
+}
+
+
+abstract class L2CapChannel {
+
+    protected static final int DEFAULT_READ_BUFFER_SIZE = 50;
+    protected final byte[] readBuffer;
+    protected BluetoothSocket socket;
+    protected OutputStream outputStream;
+    protected InputStream inputStream;
+
+    public L2CapChannel(final int readBufferSize) {
+        readBuffer = new byte[readBufferSize];
+    }
+
+    public BluetoothSocket getSocket() {
+        return socket;
+    }
+
+    public void read(final ReadL2CapChannelRequest request, final Result resultCallback) {
+        if (inputStream == null || socket == null || !socket.isConnected()) {
+            resultCallback.error(ErrorCodes.SOCKET_NOT_OPEN, "The bluetooth socket or the input stream is not open.", null);
+            return;
+        }
+        try {
+            if (inputStream.available() == 0) {
+                final ReadL2CapChannelResponse emptyResponse = new ReadL2CapChannelResponse(request.remoteId, request.psm, 0, new byte[0]);
+                resultCallback.success(emptyResponse.marshal());
+                return;
+            }
+
+            final int bytesRead = inputStream.read(readBuffer);
+            final ReadL2CapChannelResponse response = new ReadL2CapChannelResponse(request.remoteId, request.psm, bytesRead, readBuffer);
+            resultCallback.success(response.marshal());
+        } catch (IOException e) {
+            LogLevel.ERROR.log(e.getMessage(), e);
+            resultCallback.error(ErrorCodes.INPUT_STREAM_READ_FAILED, e.getMessage(), e);
+        }
+    }
+
+    public void write(final WriteL2CapChannelRequest request, final Result resultCallback) {
+        if (outputStream == null || socket == null || !socket.isConnected()) {
+            resultCallback.error(ErrorCodes.SOCKET_NOT_OPEN, "The bluetooth socket or the output stream is not open.", null);
+            return;
+        }
+        final byte[] data = request.value;
+        try {
+            outputStream.write(data);
+            resultCallback.success(null);
+        } catch (IOException e) {
+            LogLevel.ERROR.log(e.getMessage(), e);
+            resultCallback.error(ErrorCodes.OUTPUT_STREAM_WRITE_FAILED, e.getMessage(), e);
+        }
+    }
+
+    public synchronized void close() {
+        if (outputStream != null) {
+            try {
+                outputStream.close();
+            } catch (IOException e) {
+                LogLevel.ERROR.log(e.getMessage(), e);
+            } finally {
+                outputStream = null;
+            }
+        }
+        if (inputStream != null) {
+            try {
+                inputStream.close();
+            } catch (IOException e) {
+                LogLevel.ERROR.log(e.getMessage(), e);
+            } finally {
+                inputStream = null;
+            }
+        }
+        if (socket != null) {
+            try {
+                socket.close();
+            } catch (IOException e) {
+                LogLevel.ERROR.log(e.getMessage(), e);
+            } finally {
+                socket = null;
+            }
+        }
+    }
+}
+
+
+class L2CapClientChannel extends L2CapChannel {
+    private final BluetoothDevice device;
+    private final int psm;
+
+    public L2CapClientChannel(final BluetoothDevice device, final int psm) {
+        this(device, psm, DEFAULT_READ_BUFFER_SIZE);
+    }
+
+    public L2CapClientChannel(final BluetoothDevice device, final int psm, final int readBufferSize) {
+        super(readBufferSize);
+        this.psm = psm;
+        this.device = device;
+    }
+
+    @SuppressLint("MissingPermission")
+    @TargetApi(Build.VERSION_CODES.Q)
+    public synchronized void connectToL2CapChannel(final boolean secure, final Result resultCallback) {
+        try {
+            if (secure) {
+                socket = device.createL2capChannel(psm);
+            } else {
+                socket = device.createInsecureL2capChannel(psm);
+            }
+            socket.connect();
+            inputStream = socket.getInputStream();
+            outputStream = socket.getOutputStream();
+            resultCallback.success(null);
+        } catch (IOException e) {
+            LogLevel.ERROR.log(e.getMessage(), e);
+            resultCallback.error(ErrorCodes.OPEN_L2CAP_CHANNEL_FAILED, e.getMessage(), e);
+        }
+    }
+
+    public BluetoothDevice getDevice() {
+        return device;
+    }
+
+    public int getPsm() {
+        return psm;
+    }
+}
+
+class L2CapServerChannel extends L2CapChannel {
+
+
+    public L2CapServerChannel(final BluetoothSocket socket) {
+        this(socket, DEFAULT_READ_BUFFER_SIZE);
+    }
+
+    public L2CapServerChannel(final BluetoothSocket socket, final int readBufferSize) {
+        super(readBufferSize);
+        this.socket = socket;
+    }
+
+    @TargetApi(Build.VERSION_CODES.Q)
+    public synchronized void openStreams() throws IOException {
+        LogLevel.DEBUG.log("Opening streams");
+        inputStream = socket.getInputStream();
+        outputStream = socket.getOutputStream();
+    }
+}
+
+class ClientSocketInfo implements L2CapInfo {
+
+    final L2CapClientChannel l2capChannel;
+
+    public ClientSocketInfo(@NonNull final L2CapClientChannel l2capChannel) {
+        this.l2capChannel = l2capChannel;
+    }
+
+    @Override
+    public Type getType() {
+        return Type.CLIENT;
+    }
+
+    @Override
+    public int getPsm() {
+        return l2capChannel.getPsm();
+    }
+
+    @Override
+    public L2CapChannel getL2CapChannel(BluetoothDevice remoteDevice) {
+        if (remoteDevice.getAddress().equals(l2capChannel.getDevice().getAddress())) {
+            return l2capChannel;
+        }
+        return null;
+    }
+
+    @Override
+    public void close(final BluetoothDevice device) {
+        l2capChannel.close();
+    }
+}
+
+interface L2CapInfo {
+
+    Type getType();
+
+    int getPsm();
+
+    L2CapChannel getL2CapChannel(final BluetoothDevice remoteDevice);
+
+    void close(final BluetoothDevice device) throws IOException;
+
+    enum Type {
+        CLIENT, SERVER,
+    }
+}
+
+
+@RequiresApi(api = Build.VERSION_CODES.Q)
+class ServerSocketInfo implements L2CapInfo {
+
+    private static final String TAG = ServerSocketInfo.class.getSimpleName();
+    final BluetoothServerSocket serverSocket;
+    private final List<L2CapServerChannel> openChannels;
+    private final L2CapChannelManager.DeviceConnected deviceConnectedCallback;
+    private boolean isAcceptingConnections;
+
+    public ServerSocketInfo(BluetoothServerSocket serverSocket, final L2CapChannelManager.DeviceConnected deviceConnectedCallback) {
+        this.serverSocket = serverSocket;
+        this.deviceConnectedCallback = deviceConnectedCallback;
+        openChannels = Collections.synchronizedList(new LinkedList<>());
+        isAcceptingConnections = false;
+    }
+
+    @Override
+    public Type getType() {
+        return Type.SERVER;
+    }
+
+    @Override
+    public int getPsm() {
+        return serverSocket.getPsm();
+    }
+
+    void addConnection(final L2CapServerChannel channel) {
+        openChannels.add(channel);
+    }
+
+    @Override
+    public L2CapServerChannel getL2CapChannel(final BluetoothDevice remoteDevice) {
+        for (L2CapServerChannel openChannel : openChannels) {
+            if (remoteDevice.getAddress().equals(openChannel.getSocket().getRemoteDevice().getAddress())) {
+                return openChannel;
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public void close(final BluetoothDevice device) {
+        final L2CapServerChannel channelToDelete = getL2CapChannel(device);
+        if (channelToDelete == null) {
+            return;
+        }
+        channelToDelete.close();
+        openChannels.remove(channelToDelete);
+    }
+
+    public void acceptConnections() {
+        isAcceptingConnections = true;
+        new Thread(() -> {
+            while (isAcceptingConnections) {
+                try {
+                    final BluetoothSocket socket = serverSocket.accept();
+                    if (!isAcceptingConnections) {
+                        Log.d(TAG, "Stopping server socket. Close thread.");
+                        break;
+                    }
+                    final L2CapServerChannel l2capChannel = new L2CapServerChannel(socket);
+                    l2capChannel.openStreams();
+                    addConnection(l2capChannel);
+                    deviceConnectedCallback.deviceConnected(socket.getRemoteDevice(), getPsm());
+                } catch (IOException e) {
+                    if (isAcceptingConnections) {
+                        Log.e(TAG, "Accepting incoming connection failed.", e);
+                    }
+                }
+            }
+        }).start();
+    }
+
+
+    public void closeSocket() {
+        for (L2CapServerChannel openChannel : openChannels) {
+            openChannel.close();
+        }
+        openChannels.clear();
+        isAcceptingConnections = false;
+        try {
+            serverSocket.close();
+        } catch (IOException e) {
+            Log.e(TAG, "Error while closing server socket.", e);
+        }
+    }
+}
+
+class CloseL2CapChannelRequest {
+    public final String remoteId;
+    public final int psm;
+
+
+    public CloseL2CapChannelRequest(String remoteId, int psm) {
+        this.remoteId = remoteId;
+        this.psm = psm;
+    }
+
+    public static CloseL2CapChannelRequest unmarshal(final Map<String, Object> data) {
+        final String remoteId = (String) data.get(L2CapAttributeNames.KEY_REMOTE_ID);
+        final int psm = (int) data.get(L2CapAttributeNames.KEY_PSM);
+        return new CloseL2CapChannelRequest(remoteId, psm);
+    }
+
+
+}
+
+
+class CloseL2CapServer {
+    public final int psm;
+
+    public CloseL2CapServer(int psm) {
+        this.psm = psm;
+    }
+
+    public static CloseL2CapServer unmarshal(final Map<String, Object> data) {
+        final int psm = (int) data.get(L2CapAttributeNames.KEY_PSM);
+        return new CloseL2CapServer(psm);
+    }
+
+}
+
+class DeviceConnectedToL2CapChannel {
+    public final BluetoothDevice device;
+    public final int psm;
+
+    public DeviceConnectedToL2CapChannel(BluetoothDevice device, int psm) {
+        this.device = device;
+        this.psm = psm;
+    }
+
+    public HashMap<String, Object> marshal() {
+        final HashMap<String, Object> dataMap = new HashMap<>();
+        dataMap.put(L2CapAttributeNames.KEY_PSM, psm);
+        dataMap.put(L2CapAttributeNames.KEY_BLUETOOTH_DEVICE, MarshallingUtil.bmBluetoothDevice(device));
+        return dataMap;
+    }
+}
+
+class ListenL2CapChannelRequest {
+    public final boolean secure;
+
+    public ListenL2CapChannelRequest(boolean secure) {
+        this.secure = secure;
+    }
+
+    public static ListenL2CapChannelRequest unmarshal(final Map<String, Object> data) {
+        final boolean secure = (boolean) data.get(L2CapAttributeNames.KEY_SECURE);
+        return new ListenL2CapChannelRequest(secure);
+    }
+
+}
+
+class ListenL2CapChannelResponse {
+    public final int psm;
+
+    public ListenL2CapChannelResponse(final int psm) {
+        this.psm = psm;
+    }
+
+    public Map<String, Object> marshal() {
+        final Map<String, Object> dataMap = new HashMap<>();
+        dataMap.put(L2CapAttributeNames.KEY_PSM, psm);
+        return dataMap;
+    }
+}
+
+class OpenL2CapChannelRequest {
+    public final String remoteId;
+    public final int psm;
+    public final boolean secure;
+
+    public OpenL2CapChannelRequest(String remoteId, int psm, boolean secure) {
+        this.remoteId = remoteId;
+        this.psm = psm;
+        this.secure = secure;
+    }
+
+    public static OpenL2CapChannelRequest unmarshal(final Map<String, Object> data) {
+        final String remoteId = (String) data.get(L2CapAttributeNames.KEY_REMOTE_ID);
+        final int psm = (int) data.get(L2CapAttributeNames.KEY_PSM);
+        final boolean secure = (boolean) data.get(L2CapAttributeNames.KEY_SECURE);
+        return new OpenL2CapChannelRequest(remoteId, psm, secure);
+    }
+
+
+}
+
+class ReadL2CapChannelRequest {
+    public final String remoteId;
+    public final int psm;
+
+    public ReadL2CapChannelRequest(String remoteId, int psm) {
+        this.remoteId = remoteId;
+        this.psm = psm;
+    }
+
+
+    public static ReadL2CapChannelRequest unmarshal(final Map<String, Object> data) {
+        final int psm = (int) data.get(L2CapAttributeNames.KEY_PSM);
+        final String remoteId = (String) data.get(L2CapAttributeNames.KEY_REMOTE_ID);
+        return new ReadL2CapChannelRequest(remoteId, psm);
+    }
+
+}
+
+class ReadL2CapChannelResponse {
+    public final String remoteId;
+    public final int psm;
+    public final int bytesRead;
+    public final byte[] value;
+
+    public ReadL2CapChannelResponse(String remoteId, int psm, int bytesRead, byte[] value) {
+        this.remoteId = remoteId;
+        this.psm = psm;
+        this.bytesRead = bytesRead;
+        this.value = value;
+    }
+
+    public Map<String, Object> marshal() {
+        final Map<String, Object> dataMap = new HashMap<>();
+        dataMap.put(L2CapAttributeNames.KEY_REMOTE_ID, remoteId);
+        dataMap.put(L2CapAttributeNames.KEY_PSM, psm);
+        dataMap.put(L2CapAttributeNames.KEY_BYTES_READ, bytesRead);
+        dataMap.put(L2CapAttributeNames.KEY_VALUE, MarshallingUtil.bytesToHex(value));
+        return dataMap;
+    }
+}
+
+class WriteL2CapChannelRequest {
+    public final String remoteId;
+    public final int psm;
+    public final byte[] value;
+
+    public WriteL2CapChannelRequest(String remoteId, int psm, byte[] value) {
+        this.remoteId = remoteId;
+        this.psm = psm;
+        this.value = value;
+    }
+
+    public static WriteL2CapChannelRequest unmarshal(final Map<String, Object> data) {
+        final int psm = (int) data.get(L2CapAttributeNames.KEY_PSM);
+        final String remoteId = (String) data.get(L2CapAttributeNames.KEY_REMOTE_ID);
+        final String valueAsString = (String) data.get(L2CapAttributeNames.KEY_VALUE);
+        return new WriteL2CapChannelRequest(remoteId, psm, MarshallingUtil.hexToBytes(valueAsString));
+    }
+
+}
+
+interface L2CapAttributeNames {
+    String KEY_BLUETOOTH_DEVICE = "bluetoothDevice";
+    String KEY_PSM = "psm";
+    String KEY_SECURE = "secure";
+    String KEY_REMOTE_ID = "remote_id";
+    String KEY_BYTES_READ = "bytes_read";
+    String KEY_VALUE = "value";
+
+}
+
+interface L2CapMethodNames {
+
+    String CONNECT_TO_L2CAP_CHANNEL = "connectToL2CapChannel";
+    String CLOSE_L2CAP_CHANNEL = "closeL2CapChannel";
+    String READ_L2CAP_CHANNEL = "readL2CapChannel";
+    String WRITE_L2CAP_CHANNEL = "writeL2CapChannel";
+    String DEVICE_CONNECTED = "deviceConnectedToL2CapChannel";
+    String LISTEN_L2CAP_CHANNEL = "listenL2CapChannel";
+    String CLOSE_L2CAP_SERVER = "closeL2CapServer";
+}
+
+class MarshallingUtil {
+    @SuppressLint("MissingPermission")
+    static HashMap<String, Object> bmScanAdvertisement(BluetoothDevice device, ScanResult result) {
+
+        int min = Integer.MIN_VALUE;
+
+        ScanRecord adv = result.getScanRecord();
+
+        boolean connectable;
+        if (Build.VERSION.SDK_INT >= 26) { // Android 8.0, August 2017
+            connectable = result.isConnectable();
+        } else {
+            // Prior to Android 8.0, it is not possible to get if connectable.
+            // Previously, we used to check `adv.getAdvertiseFlags() & 0x2` but that
+            // returns if the device wants to be *discoverable*, which is not the same thing.
+            connectable = true;
+        }
+
+        String advName = adv != null ? adv.getDeviceName() : null;
+        int txPower = adv != null ? adv.getTxPowerLevel() : min;
+        int appearance = adv != null ? getAppearanceFromScanRecord(adv) : 0;
+        SparseArray<byte[]> manufData = adv != null ? adv.getManufacturerSpecificData() : null;
+        List<ParcelUuid> serviceUuids = adv != null ? adv.getServiceUuids() : null;
+        Map<ParcelUuid, byte[]> serviceData = adv != null ? adv.getServiceData() : null;
+
+        // Manufacturer Specific Data
+        HashMap<Integer, String> manufDataB = new HashMap<Integer, String>();
+        if (manufData != null) {
+            for (int i = 0; i < manufData.size(); i++) {
+                int key = manufData.keyAt(i);
+                byte[] value = manufData.valueAt(i);
+                manufDataB.put(key, bytesToHex(value));
+            }
+        }
+
+        // Service Data
+        HashMap<String, Object> serviceDataB = new HashMap<>();
+        if (serviceData != null) {
+            for (Map.Entry<ParcelUuid, byte[]> entry : serviceData.entrySet()) {
+                ParcelUuid key = entry.getKey();
+                byte[] value = entry.getValue();
+                serviceDataB.put(uuidStr(key.getUuid()), bytesToHex(value));
+            }
+        }
+
+        // Service UUIDs
+        List<String> serviceUuidsB = new ArrayList<String>();
+        if (serviceUuids != null) {
+            for (ParcelUuid s : serviceUuids) {
+                serviceUuidsB.add(uuidStr(s.getUuid()));
+            }
+        }
+
+        // See: BmScanAdvertisement
+        // perf: only add keys if they exists
+        HashMap<String, Object> map = new HashMap<>();
+        if (device.getAddress() != null) {
+            map.put("remote_id", device.getAddress());
+        }
+
+        if (device.getName() != null) {
+            map.put("platform_name", device.getName());
+        }
+        if (connectable) {
+            map.put("connectable", 1);
+        }
+        if (advName != null) {
+            map.put("adv_name", advName);
+        }
+        if (txPower != min) {
+            map.put("tx_power_level", txPower);
+        }
+        if (appearance != 0) {
+            map.put("appearance", appearance);
+        }
+        if (manufData != null) {
+            map.put("manufacturer_data", manufDataB);
+        }
+        if (serviceData != null) {
+            map.put("service_data", serviceDataB);
+        }
+        if (serviceUuids != null) {
+            map.put("service_uuids", serviceUuidsB);
+        }
+        if (result.getRssi() != 0) {
+            map.put("rssi", result.getRssi());
+        }
+
+        return map;
+    }
+
+    // See: BmBluetoothDevice
+    @SuppressLint("MissingPermission")
+    public static HashMap<String, Object> bmBluetoothDevice(BluetoothDevice device) {
+        HashMap<String, Object> map = new HashMap<>();
+        map.put("remote_id", device.getAddress());
+        map.put("platform_name", device.getName());
+        return map;
+    }
+
+    static HashMap<String, Object> bmBluetoothService(BluetoothDevice device, BluetoothGattService service, BluetoothGatt gatt) {
+
+        List<Object> characteristics = new ArrayList<Object>();
+        for (BluetoothGattCharacteristic c : service.getCharacteristics()) {
+            characteristics.add(bmBluetoothCharacteristic(device, c, gatt));
+        }
+
+        List<Object> includedServices = new ArrayList<Object>();
+        for (BluetoothGattService included : service.getIncludedServices()) {
+            // service includes itself?
+            if (included.getUuid().equals(service.getUuid())) {
+                continue; // skip, infinite recursion
+            }
+            includedServices.add(bmBluetoothService(device, included, gatt));
+        }
+
+        // See: BmBluetoothService
+        HashMap<String, Object> map = new HashMap<>();
+        map.put("remote_id", device.getAddress());
+        map.put("service_uuid", uuidStr(service.getUuid()));
+        map.put("is_primary", service.getType() == BluetoothGattService.SERVICE_TYPE_PRIMARY ? 1 : 0);
+        map.put("characteristics", characteristics);
+        map.put("included_services", includedServices);
+        return map;
+    }
+
+    static HashMap<String, Object> bmBluetoothCharacteristic(BluetoothDevice device, BluetoothGattCharacteristic characteristic, BluetoothGatt gatt) {
+
+        BluetoothGattService primaryService = FlutterBluePlusPlugin.getPrimaryService(gatt, characteristic);
+
+        List<Object> descriptors = new ArrayList<Object>();
+        for (BluetoothGattDescriptor d : characteristic.getDescriptors()) {
+            descriptors.add(bmBluetoothDescriptor(device, d));
+        }
+
+        // See: BmBluetoothCharacteristic
+        HashMap<String, Object> map = new HashMap<>();
+        map.put("remote_id", device.getAddress());
+        map.put("service_uuid", uuidStr(primaryService));
+        map.put("characteristic_uuid", uuidStr(characteristic.getUuid()));
+        map.put("descriptors", descriptors);
+        map.put("properties", bmCharacteristicProperties(characteristic.getProperties()));
+        return map;
+    }
+
+    // See: BmBluetoothDescriptor
+    static HashMap<String, Object> bmBluetoothDescriptor(BluetoothDevice device, BluetoothGattDescriptor descriptor) {
+        HashMap<String, Object> map = new HashMap<>();
+        map.put("remote_id", device.getAddress());
+        map.put("descriptor_uuid", uuidStr(descriptor.getUuid()));
+        map.put("characteristic_uuid", uuidStr(descriptor.getCharacteristic().getUuid()));
+        map.put("service_uuid", uuidStr(descriptor.getCharacteristic().getService().getUuid()));
+        return map;
+    }
+
+    // See: BmCharacteristicProperties
+    static HashMap<String, Object> bmCharacteristicProperties(int properties) {
+        HashMap<String, Object> props = new HashMap<>();
+        props.put("broadcast", (properties & 1) != 0 ? 1 : 0);
+        props.put("read", (properties & 2) != 0 ? 1 : 0);
+        props.put("write_without_response", (properties & 4) != 0 ? 1 : 0);
+        props.put("write", (properties & 8) != 0 ? 1 : 0);
+        props.put("notify", (properties & 16) != 0 ? 1 : 0);
+        props.put("indicate", (properties & 32) != 0 ? 1 : 0);
+        props.put("authenticated_signed_writes", (properties & 64) != 0 ? 1 : 0);
+        props.put("extended_properties", (properties & 128) != 0 ? 1 : 0);
+        props.put("notify_encryption_required", (properties & 256) != 0 ? 1 : 0);
+        props.put("indicate_encryption_required", (properties & 512) != 0 ? 1 : 0);
+        return props;
+    }
+
+    // See: BmConnectionStateEnum
+    static int bmConnectionStateEnum(int cs) {
+        switch (cs) {
+            case BluetoothProfile.STATE_DISCONNECTED:
+                return 0;
+            case BluetoothProfile.STATE_CONNECTED:
+                return 1;
+            default:
+                return 0;
+        }
+    }
+
+    // See: BmAdapterStateEnum
+    static int bmAdapterStateEnum(int as) {
+        switch (as) {
+            case BluetoothAdapter.STATE_OFF:
+                return 6;
+            case BluetoothAdapter.STATE_ON:
+                return 4;
+            case BluetoothAdapter.STATE_TURNING_OFF:
+                return 5;
+            case BluetoothAdapter.STATE_TURNING_ON:
+                return 3;
+            default:
+                return 0;
+        }
+    }
+
+    // See: BmBondStateEnum
+    static int bmBondStateEnum(int bs) {
+        switch (bs) {
+            case BluetoothDevice.BOND_NONE:
+                return 0;
+            case BluetoothDevice.BOND_BONDING:
+                return 1;
+            case BluetoothDevice.BOND_BONDED:
+                return 2;
+            default:
+                return 0;
+        }
+    }
+
+    // See: BmConnectionPriority
+    static int bmConnectionPriorityParse(int value) {
+        switch (value) {
+            case 0:
+                return BluetoothGatt.CONNECTION_PRIORITY_BALANCED;
+            case 1:
+                return BluetoothGatt.CONNECTION_PRIORITY_HIGH;
+            case 2:
+                return BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER;
+            default:
+                return BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER;
+        }
+    }
+
+    public static byte[] hexToBytes(String s) {
+        if (s == null) {
+            return new byte[0];
+        }
+        int len = s.length();
+        byte[] data = new byte[len / 2];
+
+        for (int i = 0; i < len; i += 2) {
+            data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4) + Character.digit(s.charAt(i + 1), 16));
+        }
+
+        return data;
+    }
+
+    public static String bytesToHex(byte[] bytes) {
+        if (bytes == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
+
+    static String uuid128(Object uuid) {
+        if (!(uuid instanceof UUID) && !(uuid instanceof String)) {
+            throw new IllegalArgumentException("input must be UUID or String");
+        }
+
+        String s = uuid.toString();
+
+        if (s.length() == 4) {
+            // 16-bit uuid
+            return String.format("0000%s-0000-1000-8000-00805f9b34fb", s).toLowerCase();
+        } else if (s.length() == 8) {
+            // 32-bit uuid
+            return String.format("%s-0000-1000-8000-00805f9b34fb", s).toLowerCase();
+        } else {
+            // 128-bit uuid
+            return s.toLowerCase();
+        }
+    }
+
+    // returns shortest representation
+    static String uuidStr(Object uuid) {
+        String s = uuid128(uuid);
+        boolean starts = s.startsWith("0000");
+        boolean ends = s.endsWith("-0000-1000-8000-00805f9b34fb");
+        if (starts && ends) {
+            // 16-bit
+            return s.substring(4, 8);
+        } else if (ends) {
+            // 32-bit
+            return s.substring(0, 8);
+        } else {
+            // 128-bit
+            return s;
+        }
+    }
+
+    static int getAppearanceFromScanRecord(ScanRecord adv) {
+
+        if (Build.VERSION.SDK_INT >= 33) { // Android 13 (August 2022)
+            Map<Integer, byte[]> map = adv.getAdvertisingDataMap();
+            if (map.containsKey(ScanRecord.DATA_TYPE_APPEARANCE)) {
+                byte[] bytes = map.get(ScanRecord.DATA_TYPE_APPEARANCE);
+                if (bytes.length == 2) {
+                    int loByte = bytes[0] & 0xFF;
+                    int hiByte = bytes[1] & 0xFF;
+                    return hiByte * 256 + loByte;
+                }
+            }
+            return 0;
+        }
+
+        // For API Level 21+
+        byte[] bytes = adv.getBytes();
+
+        int n = 0;
+
+        while (n < bytes.length) {
+
+            int fieldLen = bytes[n];
+
+            // no more or malformed data
+            if (fieldLen <= 0) {
+                break;
+            }
+
+            // end of packet
+            if (fieldLen + n > bytes.length - 1) {
+                break;
+            }
+
+            int dataType = bytes[n + 1];
+
+            // no more data
+            if (dataType == 0) {
+                break;
+            }
+
+            // appearance type byte
+            if (dataType == 0x19 && fieldLen == 3) {
+                int loByte = bytes[n + 2] & 0xFF;
+                int hiByte = bytes[n + 3] & 0xFF;
+                return hiByte * 256 + loByte;
+            }
+
+            n += fieldLen + 1;
+        }
+
+        return 0;
+    }
+}
+
+interface ErrorCodes {
+    String OPEN_L2CAP_CHANNEL_FAILED = "open_l2cap_channel_failed";
+    String CLOSE_L2CAP_CHANNEL_FAILED = "close_l2cap_channel_failed";
+    String SOCKET_NOT_OPEN = "no_socket_or_stream_is_open";
+    String INPUT_STREAM_READ_FAILED = "input_stream_read_failed";
+    String OUTPUT_STREAM_WRITE_FAILED = "output_stream_write_failed";
+    String NO_OPEN_L2CAP_CHANNEL_FOUND = "no_open_l2cap_channel_found";
+    String BLUETOOTH_TURNED_OFF = "bluetooth_turned_off";
+    String NO_PERMISSION = "no_permissions";
+}
+
+
+enum LogLevel {
+    NONE((tag, message, throwable) -> {
+        // Do nothing
+    }),    // 0
+    ERROR(Log::e),   // 1
+    WARNING(Log::w), // 2
+    INFO(Log::i),    // 3
+    DEBUG(Log::d),   // 4
+    VERBOSE(Log::v); // 5
+
+    private static final String TAG = "[FBP-Android]";
+    private static LogLevel LOG_LEVEL = LogLevel.DEBUG;
+    private final LogImplementation logImplementation;
+
+    LogLevel(final LogImplementation logImplementation) {
+        this.logImplementation = logImplementation;
+    }
+
+    public static void setLogLevel(final LogLevel logLevel) {
+        LOG_LEVEL = logLevel;
+    }
+
+    public void log(final String message) {
+        log(message, null);
+    }
+
+    public void log(final String message, final Throwable throwable) {
+        if (ordinal() <= LOG_LEVEL.ordinal()) {
+            logImplementation.log(TAG, String.format("[FBP] %s", message), throwable);
+        }
+    }
+
+    private interface LogImplementation {
+        void log(final String tag, final String message, final Throwable throwable);
+    }
+
+}
+
+

@@ -134,7 +134,10 @@ public class FlutterBluePlusPlugin implements
 
     private final L2CapChannelManager.DeviceConnected deviceConnectedCallback = (remoteDevice, psm) -> {
         final DeviceConnectedToL2CapChannel newConnectedDeviceState = new DeviceConnectedToL2CapChannel(remoteDevice, psm);
-        invokeMethodUIThread(L2CapMethodNames.DEVICE_CONNECTED, newConnectedDeviceState.marshal());
+        final HashMap<String, Object> deviceConnectedData = new HashMap<>();
+        deviceConnectedData.put("psm", psm);
+        deviceConnectedData.put("bluetoothDevice", MarshallingUtil.bmBluetoothDevice(remoteDevice));
+        invokeMethodUIThread("connectToL2CapChannel", deviceConnectedData);
     };
 
     private interface OperationOnPermission {
@@ -1533,8 +1536,10 @@ public class FlutterBluePlusPlugin implements
                             return;
                         }
                         final Map<String, Object> data = call.arguments();
-                        final OpenL2CapChannelRequest options = OpenL2CapChannelRequest.unmarshal(data);
-                        l2CapChannelManager.openL2CapChannel(options, result);
+                        final String remoteId = (String) data.get("remote_id");
+                        final int psm = (int) data.get("psm");
+                        final boolean secure = (boolean) data.get("secure");
+                        l2CapChannelManager.openL2CapChannel(remoteId, psm, secure, result);
                     });
                     break;
                 }
@@ -1553,23 +1558,27 @@ public class FlutterBluePlusPlugin implements
                             return;
                         }
                         final Map<String, Object> data = call.arguments();
-                        final CloseL2CapChannelRequest request = CloseL2CapChannelRequest.unmarshal(data);
-                        l2CapChannelManager.closeChannel(request, result);
+                        final String remoteId = (String) data.get("remote_id");
+                        final int psm = (int) data.get("psm");
+                        l2CapChannelManager.closeChannel(remoteId, psm, result);
                     });
                     break;
                 }
                 case "readL2CapChannel":
                 {
                     final Map<String, Object> data = call.arguments();
-                    final ReadL2CapChannelRequest options = ReadL2CapChannelRequest.unmarshal(data);
-                    l2CapChannelManager.read(options, result);
+                    final int psm = (int) data.get("psm");
+                    final String remoteId = (String) data.get("remote_id");
+                    l2CapChannelManager.read(remoteId, psm, result);
                     break;
                 }
                 case "writeL2CapChannel":
                 {
                     final Map<String, Object> data = call.arguments();
-                    final WriteL2CapChannelRequest options = WriteL2CapChannelRequest.unmarshal(data);
-                    l2CapChannelManager.write(options, result);
+                    final int psm = (int) data.get("psm");
+                    final String remoteId = (String) data.get("remote_id");
+                    final String valueAsString = (String) data.get("value");
+                    l2CapChannelManager.write(remoteId, psm, MarshallingUtil.hexToBytes(valueAsString), result);
                     break;
                 }
                 case "listenL2capChannel":
@@ -1588,8 +1597,8 @@ public class FlutterBluePlusPlugin implements
                             return;
                         }
                         final Map<String, Object> data = call.arguments();
-                        final ListenL2CapChannelRequest options = ListenL2CapChannelRequest.unmarshal(data);
-                        l2CapChannelManager.listenUsingL2capChannel(options, result);
+                        final boolean secure = (boolean) data.get("secure");
+                        l2CapChannelManager.listenUsingL2capChannel(secure, result);
                     });
                     break;
                 }
@@ -1609,8 +1618,8 @@ public class FlutterBluePlusPlugin implements
                             return;
                         }
                         final Map<String, Object> data = call.arguments();
-                        CloseL2CapServer options = CloseL2CapServer.unmarshal(data);
-                        l2CapChannelManager.closeServerSocket(options, result);
+                        final int psm = (int) data.get("psm");
+                        l2CapChannelManager.closeServerSocket(psm, result);
                     });
                     break;
                 }
@@ -3218,7 +3227,7 @@ class L2CapChannelManager {
     }
 
     @SuppressLint("MissingPermission")
-    public synchronized void listenUsingL2capChannel(ListenL2CapChannelRequest request, final Result resultCallback) {
+    public synchronized void listenUsingL2capChannel(boolean secure, final Result resultCallback) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             firePlatformNotSupportedError(resultCallback);
             return;
@@ -3231,7 +3240,7 @@ class L2CapChannelManager {
 
         try {
             final BluetoothServerSocket serverSocket;
-            if (request.secure) {
+            if (secure) {
                 serverSocket = adapter.listenUsingL2capChannel();
             } else {
                 serverSocket = adapter.listenUsingInsecureL2capChannel();
@@ -3241,8 +3250,9 @@ class L2CapChannelManager {
             final int psm = serverSocket.getPsm();
             socketInfo.acceptConnections();
 
-            final ListenL2CapChannelResponse response = new ListenL2CapChannelResponse(psm);
-            resultCallback.success(response.marshal());
+            final Map<String, Object> responseData = new HashMap<>();
+            responseData.put("psm", psm);
+            resultCallback.success(responseData);
 
         } catch (IOException e) {
             log(LogLevel.ERROR, e.getMessage());
@@ -3251,15 +3261,12 @@ class L2CapChannelManager {
 
     }
 
-    public synchronized void openL2CapChannel(final OpenL2CapChannelRequest request, final Result resultCallback) {
+    public synchronized void openL2CapChannel(String remoteId, int psm, boolean secure, final Result resultCallback) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             firePlatformNotSupportedError(resultCallback);
             return;
         }
-        final String deviceId = request.remoteId;
-        final BluetoothDevice device = adapter.getRemoteDevice(deviceId);
-        final int psm = request.psm;
-        final boolean secure = request.secure;
+        final BluetoothDevice device = adapter.getRemoteDevice(remoteId);
 
         L2CapInfo l2CapInfo = findInfo(psm);
         if (l2CapInfo == null) {
@@ -3271,46 +3278,40 @@ class L2CapChannelManager {
         l2CapChannel.connectToL2CapChannel(secure, resultCallback);
     }
 
-    public void read(final ReadL2CapChannelRequest request, final Result resultCallback) {
+    public void read(String remoteId, int psm, final Result resultCallback) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             firePlatformNotSupportedError(resultCallback);
             return;
         }
-        final String deviceId = request.remoteId;
-        final BluetoothDevice device = adapter.getRemoteDevice(deviceId);
-        final int psm = request.psm;
+        final BluetoothDevice device = adapter.getRemoteDevice(remoteId);
         final L2CapChannel channel = findChannel(psm, device);
         if (channel == null) {
             resultCallback.error("no_open_l2cap_channel_found", "No open channel found for device " + device.getAddress() + " / psm " + psm, null);
             return;
         }
-        channel.read(request, resultCallback);
+        channel.read(remoteId, psm, resultCallback);
     }
 
-    public void write(final WriteL2CapChannelRequest request, final Result resultCallback) {
+    public void write(String remoteId, int psm, byte[] value, final Result resultCallback) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             firePlatformNotSupportedError(resultCallback);
             return;
         }
-        final String deviceId = request.remoteId;
-        final BluetoothDevice device = adapter.getRemoteDevice(deviceId);
-        final int psm = request.psm;
+        final BluetoothDevice device = adapter.getRemoteDevice(remoteId);
         final L2CapChannel channel = findChannel(psm, device);
         if (channel == null) {
             resultCallback.error("no_open_l2cap_channel_found", "No open channel found for device " + device.getAddress() + " / psm " + psm, null);
             return;
         }
-        channel.write(request, resultCallback);
+        channel.write(remoteId, psm, value, resultCallback);
     }
 
-    public synchronized void closeChannel(final CloseL2CapChannelRequest request, final Result resultCallback) {
+    public synchronized void closeChannel(String remoteId, int psm, final Result resultCallback) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             firePlatformNotSupportedError(resultCallback);
             return;
         }
-        final String deviceId = request.remoteId;
-        final BluetoothDevice device = adapter.getRemoteDevice(deviceId);
-        final int psm = request.psm;
+        final BluetoothDevice device = adapter.getRemoteDevice(remoteId);
         final L2CapInfo channelInfo = findInfo(psm);
         if (channelInfo != null) {
             try {
@@ -3328,8 +3329,7 @@ class L2CapChannelManager {
         resultCallback.success(null);
     }
 
-    public synchronized void closeServerSocket(CloseL2CapServer options, final Result resultCallback) {
-        final int psm = options.psm;
+    public synchronized void closeServerSocket(int psm, final Result resultCallback) {
         final L2CapInfo channelInfo = findInfo(psm);
         if (channelInfo != null && channelInfo.getType() == L2CapInfo.Type.SERVER) {
             ((ServerSocketInfo) channelInfo).closeSocket();
@@ -3386,33 +3386,41 @@ abstract class L2CapChannel {
         return socket;
     }
 
-    public void read(final ReadL2CapChannelRequest request, final Result resultCallback) {
+    public void read(String remoteId, int psm, final Result resultCallback) {
         if (inputStream == null || socket == null || !socket.isConnected()) {
             resultCallback.error("no_socket_or_stream_is_open", "The bluetooth socket or the input stream is not open.", null);
             return;
         }
         try {
             if (inputStream.available() == 0) {
-                final ReadL2CapChannelResponse emptyResponse = new ReadL2CapChannelResponse(request.remoteId, request.psm, 0, new byte[0]);
-                resultCallback.success(emptyResponse.marshal());
+                final Map<String, Object> emptyResponseData = new HashMap<>();
+                emptyResponseData.put("remote_id", remoteId);
+                emptyResponseData.put("psm", psm);
+                emptyResponseData.put("bytes_read", 0);
+                emptyResponseData.put("value", MarshallingUtil.bytesToHex(new byte[0]));
+                resultCallback.success(emptyResponseData);
                 return;
             }
 
             final int bytesRead = inputStream.read(readBuffer);
-            final ReadL2CapChannelResponse response = new ReadL2CapChannelResponse(request.remoteId, request.psm, bytesRead, readBuffer);
-            resultCallback.success(response.marshal());
+            final Map<String, Object> responseData = new HashMap<>();
+            responseData.put("remote_id", remoteId);
+            responseData.put("psm", psm);
+            responseData.put("bytes_read", bytesRead);
+            responseData.put("value", MarshallingUtil.bytesToHex(readBuffer));
+            resultCallback.success(responseData);
         } catch (IOException e) {
             log(LogLevel.ERROR, e.getMessage());
             resultCallback.error("input_stream_read_failed", e.getMessage(), e);
         }
     }
 
-    public void write(final WriteL2CapChannelRequest request, final Result resultCallback) {
+    public void write(String remoteId, int psm, byte[] value, final Result resultCallback) {
         if (outputStream == null || socket == null || !socket.isConnected()) {
             resultCallback.error("no_socket_or_stream_is_open", "The bluetooth socket or the output stream is not open.", null);
             return;
         }
-        final byte[] data = request.value;
+        final byte[] data = value;
         try {
             outputStream.write(data);
             resultCallback.success(null);
@@ -3652,39 +3660,8 @@ class ServerSocketInfo implements L2CapInfo {
     }
 }
 
-class CloseL2CapChannelRequest {
-    public final String remoteId;
-    public final int psm;
 
 
-    public CloseL2CapChannelRequest(String remoteId, int psm) {
-        this.remoteId = remoteId;
-        this.psm = psm;
-    }
-
-    public static CloseL2CapChannelRequest unmarshal(final Map<String, Object> data) {
-        final String remoteId = (String) data.get(L2CapAttributeNames.KEY_REMOTE_ID);
-        final int psm = (int) data.get(L2CapAttributeNames.KEY_PSM);
-        return new CloseL2CapChannelRequest(remoteId, psm);
-    }
-
-
-}
-
-
-class CloseL2CapServer {
-    public final int psm;
-
-    public CloseL2CapServer(int psm) {
-        this.psm = psm;
-    }
-
-    public static CloseL2CapServer unmarshal(final Map<String, Object> data) {
-        final int psm = (int) data.get(L2CapAttributeNames.KEY_PSM);
-        return new CloseL2CapServer(psm);
-    }
-
-}
 
 class DeviceConnectedToL2CapChannel {
     public final BluetoothDevice device;
@@ -3695,144 +3672,15 @@ class DeviceConnectedToL2CapChannel {
         this.psm = psm;
     }
 
-    public HashMap<String, Object> marshal() {
-        final HashMap<String, Object> dataMap = new HashMap<>();
-        dataMap.put(L2CapAttributeNames.KEY_PSM, psm);
-        dataMap.put(L2CapAttributeNames.KEY_BLUETOOTH_DEVICE, MarshallingUtil.bmBluetoothDevice(device));
-        return dataMap;
-    }
 }
 
-class ListenL2CapChannelRequest {
-    public final boolean secure;
-
-    public ListenL2CapChannelRequest(boolean secure) {
-        this.secure = secure;
-    }
-
-    public static ListenL2CapChannelRequest unmarshal(final Map<String, Object> data) {
-        final boolean secure = (boolean) data.get(L2CapAttributeNames.KEY_SECURE);
-        return new ListenL2CapChannelRequest(secure);
-    }
-
-}
-
-class ListenL2CapChannelResponse {
-    public final int psm;
-
-    public ListenL2CapChannelResponse(final int psm) {
-        this.psm = psm;
-    }
-
-    public Map<String, Object> marshal() {
-        final Map<String, Object> dataMap = new HashMap<>();
-        dataMap.put(L2CapAttributeNames.KEY_PSM, psm);
-        return dataMap;
-    }
-}
-
-class OpenL2CapChannelRequest {
-    public final String remoteId;
-    public final int psm;
-    public final boolean secure;
-
-    public OpenL2CapChannelRequest(String remoteId, int psm, boolean secure) {
-        this.remoteId = remoteId;
-        this.psm = psm;
-        this.secure = secure;
-    }
-
-    public static OpenL2CapChannelRequest unmarshal(final Map<String, Object> data) {
-        final String remoteId = (String) data.get(L2CapAttributeNames.KEY_REMOTE_ID);
-        final int psm = (int) data.get(L2CapAttributeNames.KEY_PSM);
-        final boolean secure = (boolean) data.get(L2CapAttributeNames.KEY_SECURE);
-        return new OpenL2CapChannelRequest(remoteId, psm, secure);
-    }
 
 
-}
-
-class ReadL2CapChannelRequest {
-    public final String remoteId;
-    public final int psm;
-
-    public ReadL2CapChannelRequest(String remoteId, int psm) {
-        this.remoteId = remoteId;
-        this.psm = psm;
-    }
 
 
-    public static ReadL2CapChannelRequest unmarshal(final Map<String, Object> data) {
-        final int psm = (int) data.get(L2CapAttributeNames.KEY_PSM);
-        final String remoteId = (String) data.get(L2CapAttributeNames.KEY_REMOTE_ID);
-        return new ReadL2CapChannelRequest(remoteId, psm);
-    }
 
-}
 
-class ReadL2CapChannelResponse {
-    public final String remoteId;
-    public final int psm;
-    public final int bytesRead;
-    public final byte[] value;
 
-    public ReadL2CapChannelResponse(String remoteId, int psm, int bytesRead, byte[] value) {
-        this.remoteId = remoteId;
-        this.psm = psm;
-        this.bytesRead = bytesRead;
-        this.value = value;
-    }
-
-    public Map<String, Object> marshal() {
-        final Map<String, Object> dataMap = new HashMap<>();
-        dataMap.put(L2CapAttributeNames.KEY_REMOTE_ID, remoteId);
-        dataMap.put(L2CapAttributeNames.KEY_PSM, psm);
-        dataMap.put(L2CapAttributeNames.KEY_BYTES_READ, bytesRead);
-        dataMap.put(L2CapAttributeNames.KEY_VALUE, MarshallingUtil.bytesToHex(value));
-        return dataMap;
-    }
-}
-
-class WriteL2CapChannelRequest {
-    public final String remoteId;
-    public final int psm;
-    public final byte[] value;
-
-    public WriteL2CapChannelRequest(String remoteId, int psm, byte[] value) {
-        this.remoteId = remoteId;
-        this.psm = psm;
-        this.value = value;
-    }
-
-    public static WriteL2CapChannelRequest unmarshal(final Map<String, Object> data) {
-        final int psm = (int) data.get(L2CapAttributeNames.KEY_PSM);
-        final String remoteId = (String) data.get(L2CapAttributeNames.KEY_REMOTE_ID);
-        final String valueAsString = (String) data.get(L2CapAttributeNames.KEY_VALUE);
-        return new WriteL2CapChannelRequest(remoteId, psm, MarshallingUtil.hexToBytes(valueAsString));
-    }
-
-}
-
-interface L2CapAttributeNames {
-    String KEY_BLUETOOTH_DEVICE = "bluetoothDevice";
-    String KEY_PSM = "psm";
-    String KEY_SECURE = "secure";
-    String KEY_REMOTE_ID = "remote_id";
-    String KEY_BYTES_READ = "bytes_read";
-    String KEY_VALUE = "value";
-
-}
-
-interface L2CapMethodNames {
-
-    String CONNECT_TO_L2CAP_CHANNEL = "connectToL2CapChannel";
-    String CLOSE_L2CAP_CHANNEL = "closeL2CapChannel";
-    String READ_L2CAP_CHANNEL = "readL2CapChannel";
-    String WRITE_L2CAP_CHANNEL = "writeL2CapChannel";
-    String DEVICE_CONNECTED = "deviceConnectedToL2CapChannel";
-    String LISTEN_L2CAP_CHANNEL = "listenL2CapChannel";
-    String CLOSE_L2CAP_SERVER = "closeL2CapServer";
-}
 
 class MarshallingUtil {
     @SuppressLint("MissingPermission")

@@ -1577,8 +1577,8 @@ public class FlutterBluePlusPlugin implements
                     final Map<String, Object> data = call.arguments();
                     final int psm = (int) data.get("psm");
                     final String remoteId = (String) data.get("remote_id");
-                    final String valueAsString = (String) data.get("value");
-                    l2CapChannelManager.write(remoteId, psm, MarshallingUtil.hexToBytes(valueAsString), result);
+                    final byte[] value = (byte[]) data.get("value");
+                    l2CapChannelManager.write(remoteId, psm, value, result);
                     break;
                 }
                 case "listenL2capChannel":
@@ -3397,7 +3397,7 @@ abstract class L2CapChannel {
                 emptyResponseData.put("remote_id", remoteId);
                 emptyResponseData.put("psm", psm);
                 emptyResponseData.put("bytes_read", 0);
-                emptyResponseData.put("value", MarshallingUtil.bytesToHex(new byte[0]));
+                emptyResponseData.put("value", new byte[0]);
                 resultCallback.success(emptyResponseData);
                 return;
             }
@@ -3407,7 +3407,7 @@ abstract class L2CapChannel {
             responseData.put("remote_id", remoteId);
             responseData.put("psm", psm);
             responseData.put("bytes_read", bytesRead);
-            responseData.put("value", MarshallingUtil.bytesToHex(readBuffer));
+            responseData.put("value", readBuffer);
             resultCallback.success(responseData);
         } catch (IOException e) {
             log(LogLevel.ERROR, e.getMessage());
@@ -3909,30 +3909,7 @@ class MarshallingUtil {
         }
     }
 
-    public static byte[] hexToBytes(String s) {
-        if (s == null) {
-            return new byte[0];
-        }
-        int len = s.length();
-        byte[] data = new byte[len / 2];
 
-        for (int i = 0; i < len; i += 2) {
-            data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4) + Character.digit(s.charAt(i + 1), 16));
-        }
-
-        return data;
-    }
-
-    public static String bytesToHex(byte[] bytes) {
-        if (bytes == null) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder();
-        for (byte b : bytes) {
-            sb.append(String.format("%02x", b));
-        }
-        return sb.toString();
-    }
 
     static String uuid128(Object uuid) {
         if (!(uuid instanceof UUID) && !(uuid instanceof String)) {

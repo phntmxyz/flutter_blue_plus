@@ -3225,7 +3225,7 @@ class L2CapChannelManager {
         }
         if (!adapter.isEnabled()) {
             log(LogLevel.DEBUG, "Bluetooth is disabled. Please enable first.");
-            resultCallback.error(ErrorCodes.BLUETOOTH_TURNED_OFF, "Bluetooth is turned off.", null);
+            resultCallback.error("bluetooth_turned_off", "Bluetooth is turned off.", null);
             return;
         }
 
@@ -3246,7 +3246,7 @@ class L2CapChannelManager {
 
         } catch (IOException e) {
             log(LogLevel.ERROR, e.getMessage());
-            resultCallback.error(ErrorCodes.OPEN_L2CAP_CHANNEL_FAILED, e.getMessage(), e);
+            resultCallback.error("open_l2cap_channel_failed", e.getMessage(), e);
         }
 
     }
@@ -3281,7 +3281,7 @@ class L2CapChannelManager {
         final int psm = request.psm;
         final L2CapChannel channel = findChannel(psm, device);
         if (channel == null) {
-            resultCallback.error(ErrorCodes.NO_OPEN_L2CAP_CHANNEL_FOUND, "No open channel found for device " + device.getAddress() + " / psm " + psm, null);
+            resultCallback.error("no_open_l2cap_channel_found", "No open channel found for device " + device.getAddress() + " / psm " + psm, null);
             return;
         }
         channel.read(request, resultCallback);
@@ -3297,7 +3297,7 @@ class L2CapChannelManager {
         final int psm = request.psm;
         final L2CapChannel channel = findChannel(psm, device);
         if (channel == null) {
-            resultCallback.error(ErrorCodes.NO_OPEN_L2CAP_CHANNEL_FOUND, "No open channel found for device " + device.getAddress() + " / psm " + psm, null);
+            resultCallback.error("no_open_l2cap_channel_found", "No open channel found for device " + device.getAddress() + " / psm " + psm, null);
             return;
         }
         channel.write(request, resultCallback);
@@ -3317,7 +3317,7 @@ class L2CapChannelManager {
                 channelInfo.close(device);
             } catch (IOException e) {
                 log(LogLevel.ERROR, e.getMessage());
-                resultCallback.error(ErrorCodes.CLOSE_L2CAP_CHANNEL_FAILED, "Can't close channel with psm " + psm, null);
+                resultCallback.error("close_l2cap_channel_failed", "Can't close channel with psm " + psm, null);
             }
             if (channelInfo.getType() == L2CapInfo.Type.CLIENT) {
                 openL2CapChannelInfos.remove(channelInfo);
@@ -3388,7 +3388,7 @@ abstract class L2CapChannel {
 
     public void read(final ReadL2CapChannelRequest request, final Result resultCallback) {
         if (inputStream == null || socket == null || !socket.isConnected()) {
-            resultCallback.error(ErrorCodes.SOCKET_NOT_OPEN, "The bluetooth socket or the input stream is not open.", null);
+            resultCallback.error("no_socket_or_stream_is_open", "The bluetooth socket or the input stream is not open.", null);
             return;
         }
         try {
@@ -3403,13 +3403,13 @@ abstract class L2CapChannel {
             resultCallback.success(response.marshal());
         } catch (IOException e) {
             log(LogLevel.ERROR, e.getMessage());
-            resultCallback.error(ErrorCodes.INPUT_STREAM_READ_FAILED, e.getMessage(), e);
+            resultCallback.error("input_stream_read_failed", e.getMessage(), e);
         }
     }
 
     public void write(final WriteL2CapChannelRequest request, final Result resultCallback) {
         if (outputStream == null || socket == null || !socket.isConnected()) {
-            resultCallback.error(ErrorCodes.SOCKET_NOT_OPEN, "The bluetooth socket or the output stream is not open.", null);
+            resultCallback.error("no_socket_or_stream_is_open", "The bluetooth socket or the output stream is not open.", null);
             return;
         }
         final byte[] data = request.value;
@@ -3418,7 +3418,7 @@ abstract class L2CapChannel {
             resultCallback.success(null);
         } catch (IOException e) {
             log(LogLevel.ERROR, e.getMessage());
-            resultCallback.error(ErrorCodes.OUTPUT_STREAM_WRITE_FAILED, e.getMessage(), e);
+            resultCallback.error("output_stream_write_failed", e.getMessage(), e);
         }
     }
 
@@ -3483,7 +3483,7 @@ class L2CapClientChannel extends L2CapChannel {
             resultCallback.success(null);
         } catch (IOException e) {
             log(LogLevel.ERROR, e.getMessage());
-            resultCallback.error(ErrorCodes.OPEN_L2CAP_CHANNEL_FAILED, e.getMessage(), e);
+            resultCallback.error("open_l2cap_channel_failed", e.getMessage(), e);
         }
     }
 
@@ -4177,16 +4177,6 @@ class MarshallingUtil {
     }
 }
 
-interface ErrorCodes {
-    String OPEN_L2CAP_CHANNEL_FAILED = "open_l2cap_channel_failed";
-    String CLOSE_L2CAP_CHANNEL_FAILED = "close_l2cap_channel_failed";
-    String SOCKET_NOT_OPEN = "no_socket_or_stream_is_open";
-    String INPUT_STREAM_READ_FAILED = "input_stream_read_failed";
-    String OUTPUT_STREAM_WRITE_FAILED = "output_stream_write_failed";
-    String NO_OPEN_L2CAP_CHANNEL_FOUND = "no_open_l2cap_channel_found";
-    String BLUETOOTH_TURNED_OFF = "bluetooth_turned_off";
-    String NO_PERMISSION = "no_permissions";
-}
 
 
 

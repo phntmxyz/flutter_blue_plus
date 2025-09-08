@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import 'device_screen.dart';
+import 'l2cap_demo_screen.dart';
 import '../utils/snackbar.dart';
 import '../widgets/system_device_tile.dart';
 import '../widgets/scan_result_tile.dart';
@@ -175,12 +176,62 @@ class _ScanScreenState extends State<ScanScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Find Devices'),
-          actions: [buildScanButton(), const SizedBox(width: 15)],
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.router),
+              tooltip: 'L2CAP Demo',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (context) => const L2CapDemoScreen()),
+              ),
+            ),
+            buildScanButton(), 
+            const SizedBox(width: 15),
+          ],
         ),
         body: RefreshIndicator(
           onRefresh: onRefresh,
           child: ListView(
             children: <Widget>[
+              // Add L2CAP info banner
+              Container(
+                margin: const EdgeInsets.all(8.0),
+                padding: const EdgeInsets.all(12.0),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  border: Border.all(color: Colors.blue[300]!),
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.router, color: Colors.blue[700]),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'L2CAP Support Added',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue[700],
+                            ),
+                          ),
+                          const Text(
+                            'Direct socket communication for high-speed data transfer',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (context) => const L2CapDemoScreen()),
+                      ),
+                      child: const Text('Demo'),
+                    ),
+                  ],
+                ),
+              ),
               ..._buildSystemDeviceTiles(),
               ..._buildScanResultTiles(),
             ],

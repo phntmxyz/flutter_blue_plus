@@ -58,6 +58,35 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     LVERBOSE = 5,
 };
 
+@class L2CapChannelManager;
+@class L2CapChannelInfo;
+
+@interface L2CapChannelInfo : NSObject
+@property(nonatomic) NSNumber *psm;
+@property(nonatomic) NSString *remoteId;
+@property(nonatomic) CBL2CAPChannel *channel;
+@property(nonatomic) NSMutableData *readBuffer;
+@property(nonatomic, getter=isListening) BOOL listening;
+- (instancetype)initWithPsm:(NSNumber *)psm remoteId:(NSString *)remoteId channel:(CBL2CAPChannel *)channel;
+@end
+
+@interface L2CapChannelManager : NSObject <CBPeripheralManagerDelegate, NSStreamDelegate>
+@property(nonatomic, retain) FlutterMethodChannel *methodChannel;
+@property(nonatomic, weak) FlutterBluePlusPlugin *plugin;
+@property(nonatomic) NSMutableArray<L2CapChannelInfo *> *channels;
+@property(nonatomic) NSMutableDictionary<NSNumber *, CBPeripheralManager *> *peripheralManagers;
+@property(nonatomic) NSMutableDictionary<NSNumber *, CBMutableService *> *publishedServices;
+- (instancetype)initWithMethodChannel:(FlutterMethodChannel *)methodChannel plugin:(FlutterBluePlusPlugin *)plugin;
+- (void)handleOpenL2CapChannel:(FlutterMethodCall *)call result:(FlutterResult)result;
+- (void)handleCloseL2CapChannel:(FlutterMethodCall *)call result:(FlutterResult)result;
+- (void)handleReadL2CapChannel:(FlutterMethodCall *)call result:(FlutterResult)result;
+- (void)handleWriteL2CapChannel:(FlutterMethodCall *)call result:(FlutterResult)result;
+- (void)handleListenL2capChannel:(FlutterMethodCall *)call result:(FlutterResult)result;
+- (void)handleStopListenL2capChannel:(FlutterMethodCall *)call result:(FlutterResult)result;
+- (void)setupPeripheralDelegates:(FlutterBluePlusPlugin *)plugin;
+- (void)setupStreamsForChannel:(L2CapChannelInfo *)channelInfo;
+@end
+
 @interface FlutterBluePlusPlugin ()
 @property(nonatomic, retain) NSObject<FlutterPluginRegistrar> *registrar;
 @property(nonatomic, retain) FlutterMethodChannel *methodChannel;
@@ -77,6 +106,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
 @property(nonatomic) LogLevel logLevel;
 @property(nonatomic) NSNumber *showPowerAlert;
 @property(nonatomic) NSNumber *restoreState;
+@property(nonatomic, retain) L2CapChannelManager *l2CapChannelManager;
 @end
 
 @implementation FlutterBluePlusPlugin
@@ -99,6 +129,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     instance.logLevel = LDEBUG;
     instance.showPowerAlert = @(YES);
     instance.restoreState = @(NO);
+    instance.l2CapChannelManager = [[L2CapChannelManager alloc] initWithMethodChannel:methodChannel plugin:instance];
 
     [registrar addMethodCallDelegate:instance channel:methodChannel];
 }
@@ -831,6 +862,30 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
             result([FlutterError errorWithCode:@"clearGattCache" 
                                     message:@"android only"
                                     details:NULL]);
+        }
+        else if([@"openL2CapChannel" isEqualToString:call.method])
+        {
+            [self.l2CapChannelManager handleOpenL2CapChannel:call result:result];
+        }
+        else if([@"closeL2CapChannel" isEqualToString:call.method])
+        {
+            [self.l2CapChannelManager handleCloseL2CapChannel:call result:result];
+        }
+        else if([@"readL2CapChannel" isEqualToString:call.method])
+        {
+            [self.l2CapChannelManager handleReadL2CapChannel:call result:result];
+        }
+        else if([@"writeL2CapChannel" isEqualToString:call.method])
+        {
+            [self.l2CapChannelManager handleWriteL2CapChannel:call result:result];
+        }
+        else if([@"listenL2capChannel" isEqualToString:call.method])
+        {
+            [self.l2CapChannelManager handleListenL2capChannel:call result:result];
+        }
+        else if([@"stopListenL2capChannel" isEqualToString:call.method])
+        {
+            [self.l2CapChannelManager handleStopListenL2capChannel:call result:result];
         }
         else
         {
@@ -2297,4 +2352,366 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     }
     return data;
 }
+
+// L2CAP channel delegate method for client side
+- (void)peripheral:(CBPeripheral *)peripheral didOpenL2CAPChannel:(CBL2CAPChannel *)channel error:(NSError *)error API_AVAILABLE(ios(11.0))
+{
+    if (error) {
+        Log(LERROR, @"didOpenL2CAPChannel error: %@", error.localizedDescription);
+        return;
+    }
+    
+    Log(LDEBUG, @"didOpenL2CAPChannel: PSM=%d", channel.PSM);
+    
+    NSString *remoteId = [[peripheral identifier] UUIDString];
+    L2CapChannelInfo *channelInfo = [[L2CapChannelInfo alloc] initWithPsm:@(channel.PSM) 
+                                                                  remoteId:remoteId
+                                                                   channel:channel];
+    [self.l2CapChannelManager.channels addObject:channelInfo];
+    
+    [self.l2CapChannelManager setupStreamsForChannel:channelInfo];
+    
+    [self.methodChannel invokeMethod:@"OnL2CapChannelOpened" arguments:@{
+        @"remote_id": remoteId,
+        @"psm": @(channel.PSM)
+    }];
+}
+
+@end
+
+//////////////////////////////////////////////////////////////////////
+// ██       ██████   ██████   █████   ██████      ██████  ██   ██  ██
+// ██       ╚════██ ██       ██   ██  ██   ██    ██      ██   ██  ██
+// ██        █████  ██       ███████  ██████     ██      ███████  ██
+// ██       ██      ██       ██   ██  ██         ██      ██   ██
+// ███████  ███████  ██████  ██   ██  ██          ██████ ██   ██  ██
+//
+//  ██████  ██   ██   █████   ███    ██  ███    ██  ███████  ██
+// ██       ██   ██  ██   ██  ████   ██  ████   ██  ██       ██
+// ██       ███████  ███████  ██ ██  ██  ██ ██  ██  █████    ██
+// ██       ██   ██  ██   ██  ██  ██ ██  ██  ██ ██  ██       ██
+//  ██████  ██   ██  ██   ██  ██   ████  ██   ████  ███████  ███████
+
+@implementation L2CapChannelInfo
+- (instancetype)initWithPsm:(NSNumber *)psm remoteId:(NSString *)remoteId channel:(CBL2CAPChannel *)channel
+{
+    self = [super init];
+    if (self) {
+        self.psm = psm;
+        self.remoteId = remoteId;
+        self.channel = channel;
+        self.readBuffer = [[NSMutableData alloc] init];
+        self.listening = NO;
+    }
+    return self;
+}
+@end
+
+@implementation L2CapChannelManager
+
+- (instancetype)initWithMethodChannel:(FlutterMethodChannel *)methodChannel plugin:(FlutterBluePlusPlugin *)plugin
+{
+    self = [super init];
+    if (self) {
+        self.methodChannel = methodChannel;
+        self.plugin = plugin;
+        self.channels = [[NSMutableArray alloc] init];
+        self.peripheralManagers = [[NSMutableDictionary alloc] init];
+        self.publishedServices = [[NSMutableDictionary alloc] init];
+    }
+    return self;
+}
+
+- (void)handleOpenL2CapChannel:(FlutterMethodCall *)call result:(FlutterResult)result
+{
+    if (@available(iOS 11.0, *)) {
+        NSDictionary *args = call.arguments;
+        NSString *remoteId = args[@"remote_id"];
+        NSNumber *psmValue = args[@"psm"];
+        CBPeripheral *peripheral = [self findPeripheralById:remoteId];
+        
+        if (peripheral == nil) {
+            result([FlutterError errorWithCode:@"openL2CapChannel" 
+                                      message:@"Peripheral not found" 
+                                      details:nil]);
+            return;
+        }
+        
+        if (peripheral.state != CBPeripheralStateConnected) {
+            result([FlutterError errorWithCode:@"openL2CapChannel" 
+                                      message:@"Peripheral not connected" 
+                                      details:nil]);
+            return;
+        }
+        
+        [peripheral openL2CAPChannel:[psmValue unsignedShortValue]];
+        result(nil);
+    } else {
+        result([FlutterError errorWithCode:@"openL2CapChannel" 
+                                  message:@"L2CAP channels require iOS 11.0 or later" 
+                                  details:nil]);
+    }
+}
+
+- (void)handleCloseL2CapChannel:(FlutterMethodCall *)call result:(FlutterResult)result
+{
+    NSDictionary *args = call.arguments;
+    NSString *remoteId = args[@"remote_id"];
+    NSNumber *psmValue = args[@"psm"];
+    
+    L2CapChannelInfo *channelInfo = [self findChannelByRemoteId:remoteId psm:psmValue];
+    if (channelInfo && channelInfo.channel) {
+        channelInfo.channel.inputStream.delegate = nil;
+        channelInfo.channel.outputStream.delegate = nil;
+        [channelInfo.channel.inputStream close];
+        [channelInfo.channel.outputStream close];
+        [self.channels removeObject:channelInfo];
+    }
+    
+    result(nil);
+}
+
+- (void)handleReadL2CapChannel:(FlutterMethodCall *)call result:(FlutterResult)result
+{
+    NSDictionary *args = call.arguments;
+    NSString *remoteId = args[@"remote_id"];
+    NSNumber *psmValue = args[@"psm"];
+    
+    L2CapChannelInfo *channelInfo = [self findChannelByRemoteId:remoteId psm:psmValue];
+    if (channelInfo && channelInfo.readBuffer.length > 0) {
+        NSData *data = [NSData dataWithData:channelInfo.readBuffer];
+        [channelInfo.readBuffer setLength:0];
+        result(data);
+    } else {
+        result([NSData data]);
+    }
+}
+
+- (void)handleWriteL2CapChannel:(FlutterMethodCall *)call result:(FlutterResult)result
+{
+    NSDictionary *args = call.arguments;
+    NSString *remoteId = args[@"remote_id"];
+    NSNumber *psmValue = args[@"psm"];
+    FlutterStandardTypedData *valueData = args[@"value"];
+    
+    L2CapChannelInfo *channelInfo = [self findChannelByRemoteId:remoteId psm:psmValue];
+    if (channelInfo && channelInfo.channel && channelInfo.channel.outputStream) {
+        NSOutputStream *outputStream = channelInfo.channel.outputStream;
+        if (outputStream.hasSpaceAvailable) {
+            NSInteger bytesWritten = [outputStream write:valueData.data.bytes maxLength:valueData.data.length];
+            if (bytesWritten < 0) {
+                result([FlutterError errorWithCode:@"writeL2CapChannel" 
+                                          message:@"Write failed" 
+                                          details:nil]);
+            } else {
+                result(nil);
+            }
+        } else {
+            result([FlutterError errorWithCode:@"writeL2CapChannel" 
+                                      message:@"Output stream not ready" 
+                                      details:nil]);
+        }
+    } else {
+        result([FlutterError errorWithCode:@"writeL2CapChannel" 
+                                  message:@"Channel not found" 
+                                  details:nil]);
+    }
+}
+
+- (void)handleListenL2capChannel:(FlutterMethodCall *)call result:(FlutterResult)result
+{
+    if (@available(iOS 11.0, *)) {
+        NSDictionary *args = call.arguments;
+        NSNumber *secure = args[@"secure"];
+        
+        CBPeripheralManager *peripheralManager = [[CBPeripheralManager alloc] initWithDelegate:self queue:nil];
+        
+        [peripheralManager publishL2CAPChannelWithEncryption:[secure boolValue]];
+        
+        NSNumber *psmPlaceholder = @(0);
+        self.peripheralManagers[psmPlaceholder] = peripheralManager;
+        
+        result(@{@"psm": psmPlaceholder});
+    } else {
+        result([FlutterError errorWithCode:@"listenL2capChannel" 
+                                  message:@"L2CAP channels require iOS 11.0 or later" 
+                                  details:nil]);
+    }
+}
+
+- (void)handleStopListenL2capChannel:(FlutterMethodCall *)call result:(FlutterResult)result
+{
+    NSDictionary *args = call.arguments;
+    NSNumber *psmValue = args[@"psm"];
+    
+    CBPeripheralManager *peripheralManager = self.peripheralManagers[psmValue];
+    if (peripheralManager) {
+        [peripheralManager unpublishL2CAPChannel:psmValue.unsignedShortValue];
+        [self.peripheralManagers removeObjectForKey:psmValue];
+        [self.publishedServices removeObjectForKey:psmValue];
+    }
+    
+    result(nil);
+}
+
+- (CBPeripheral *)findPeripheralById:(NSString *)remoteId
+{
+    if (self.plugin && self.plugin.knownPeripherals) {
+        return self.plugin.knownPeripherals[remoteId];
+    }
+    return nil;
+}
+
+- (L2CapChannelInfo *)findChannelByRemoteId:(NSString *)remoteId psm:(NSNumber *)psm
+{
+    for (L2CapChannelInfo *info in self.channels) {
+        if ([info.remoteId isEqualToString:remoteId] && [info.psm isEqualToNumber:psm]) {
+            return info;
+        }
+    }
+    return nil;
+}
+
+#pragma mark - CBPeripheralManagerDelegate
+
+- (void)peripheralManagerDidUpdateState:(CBPeripheralManager *)peripheral
+{
+}
+
+- (void)peripheralManager:(CBPeripheralManager *)peripheral didPublishL2CAPChannel:(CBL2CAPPSM)PSM error:(NSError *)error API_AVAILABLE(ios(11.0))
+{
+    if (error) {
+        NSLog(@"Failed to publish L2CAP channel: %@", error.localizedDescription);
+        return;
+    }
+    
+    NSNumber *psmValue = @(PSM);
+    self.peripheralManagers[psmValue] = peripheral;
+    [self.peripheralManagers removeObjectForKey:@(0)];
+    
+    [self.methodChannel invokeMethod:@"OnL2CapChannelPublished" arguments:@{@"psm": psmValue}];
+}
+
+- (void)peripheralManager:(CBPeripheralManager *)peripheral didUnpublishL2CAPChannel:(CBL2CAPPSM)PSM error:(NSError *)error API_AVAILABLE(ios(11.0))
+{
+    if (error) {
+        NSLog(@"Failed to unpublish L2CAP channel: %@", error.localizedDescription);
+    }
+    
+    [self.methodChannel invokeMethod:@"OnL2CapChannelUnpublished" arguments:@{@"psm": @(PSM)}];
+}
+
+- (void)peripheralManager:(CBPeripheralManager *)peripheral didOpenL2CAPChannel:(CBL2CAPChannel *)channel error:(NSError *)error API_AVAILABLE(ios(11.0))
+{
+    if (error) {
+        NSLog(@"Failed to open L2CAP channel: %@", error.localizedDescription);
+        return;
+    }
+    
+    L2CapChannelInfo *channelInfo = [[L2CapChannelInfo alloc] initWithPsm:@(channel.PSM) 
+                                                                  remoteId:@"server"
+                                                                   channel:channel];
+    [self.channels addObject:channelInfo];
+    
+    [self setupStreamsForChannel:channelInfo];
+    
+    [self.methodChannel invokeMethod:@"OnL2CapChannelOpened" arguments:@{
+        @"remote_id": @"server",
+        @"psm": @(channel.PSM)
+    }];
+}
+
+- (void)setupStreamsForChannel:(L2CapChannelInfo *)channelInfo
+{
+    if (@available(iOS 11.0, *)) {
+        CBL2CAPChannel *channel = channelInfo.channel;
+        
+        channel.inputStream.delegate = (id<NSStreamDelegate>)self;
+        channel.outputStream.delegate = (id<NSStreamDelegate>)self;
+        
+        [channel.inputStream scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
+        [channel.outputStream scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
+        
+        [channel.inputStream open];
+        [channel.outputStream open];
+    }
+}
+
+- (void)setupPeripheralDelegates:(FlutterBluePlusPlugin *)plugin
+{
+    for (CBPeripheral *peripheral in plugin.knownPeripherals.allValues) {
+        if ([peripheral.delegate class] == [FlutterBluePlusPlugin class]) {
+            FlutterBluePlusPlugin *pluginDelegate = (FlutterBluePlusPlugin *)peripheral.delegate;
+            pluginDelegate.l2CapChannelManager = self;
+        }
+    }
+}
+
+#pragma mark - NSStreamDelegate
+
+- (void)stream:(NSStream *)aStream handleEvent:(NSStreamEvent)eventCode
+{
+    L2CapChannelInfo *channelInfo = [self findChannelForStream:aStream];
+    if (!channelInfo) return;
+    
+    switch (eventCode) {
+        case NSStreamEventHasBytesAvailable:
+            if (aStream == channelInfo.channel.inputStream) {
+                [self handleBytesAvailableForChannel:channelInfo];
+            }
+            break;
+        case NSStreamEventHasSpaceAvailable:
+            break;
+        case NSStreamEventErrorOccurred:
+            NSLog(@"L2CAP Stream error: %@", [aStream streamError]);
+            break;
+        case NSStreamEventEndEncountered:
+            [self handleStreamEndForChannel:channelInfo];
+            break;
+        default:
+            break;
+    }
+}
+
+- (void)handleBytesAvailableForChannel:(L2CapChannelInfo *)channelInfo
+{
+    if (@available(iOS 11.0, *)) {
+        NSInputStream *inputStream = channelInfo.channel.inputStream;
+        uint8_t buffer[1024];
+        NSInteger bytesRead = [inputStream read:buffer maxLength:sizeof(buffer)];
+        
+        if (bytesRead > 0) {
+            [channelInfo.readBuffer appendBytes:buffer length:bytesRead];
+            
+            [self.methodChannel invokeMethod:@"OnL2CapChannelReceive" arguments:@{
+                @"remote_id": channelInfo.remoteId,
+                @"psm": channelInfo.psm,
+                @"value": [NSData dataWithBytes:buffer length:bytesRead]
+            }];
+        }
+    }
+}
+
+- (void)handleStreamEndForChannel:(L2CapChannelInfo *)channelInfo
+{
+    [self.methodChannel invokeMethod:@"OnL2CapChannelClosed" arguments:@{
+        @"remote_id": channelInfo.remoteId,
+        @"psm": channelInfo.psm
+    }];
+    
+    [self.channels removeObject:channelInfo];
+}
+
+- (L2CapChannelInfo *)findChannelForStream:(NSStream *)stream
+{
+    for (L2CapChannelInfo *info in self.channels) {
+        if (@available(iOS 11.0, *)) {
+            if (info.channel.inputStream == stream || info.channel.outputStream == stream) {
+                return info;
+            }
+        }
+    }
+    return nil;
+}
+
 @end

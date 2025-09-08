@@ -10,6 +10,10 @@ class BluetoothDescriptor {
   final Guid characteristicUuid;
   final Guid descriptorUuid;
   final Guid? primaryServiceUuid;
+
+  /// uniquely identifies the characteristic
+  /// this descriptor is associated with
+  /// on the platform native side
   final int? instanceId;
 
   BluetoothDescriptor({
@@ -55,8 +59,8 @@ class BluetoothDescriptor {
       .where((p) => p.serviceUuid == serviceUuid)
       .where((p) => p.descriptorUuid == descriptorUuid)
       .where((p) => p.primaryServiceUuid == primaryServiceUuid)
-      .where((p) => p.success == true)
       .where((p) => p.instanceId == null || p.instanceId == instanceId)
+      .where((p) => p.success == true)
       .map((p) => p.value)
       .newStreamWithInitialValue(lastValue);
 
@@ -68,8 +72,8 @@ class BluetoothDescriptor {
       .where((p) => p.serviceUuid == serviceUuid)
       .where((p) => p.descriptorUuid == descriptorUuid)
       .where((p) => p.primaryServiceUuid == primaryServiceUuid)
-      .where((p) => p.success == true)
       .where((p) => p.instanceId == null || p.instanceId == instanceId)
+      .where((p) => p.success == true)
       .map((p) => p.value);
 
   /// Retrieves the value of a specified descriptor
@@ -192,8 +196,8 @@ class BluetoothDescriptor {
         'characteristicUuid: $characteristicUuid, '
         'descriptorUuid: $descriptorUuid, '
         'primaryServiceUuid: $primaryServiceUuid'
-        'lastValue: $lastValue'
         'instanceId: $instanceId'
+        'lastValue: $lastValue'
         '}';
   }
 

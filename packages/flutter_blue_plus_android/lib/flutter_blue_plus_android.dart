@@ -454,7 +454,7 @@ final class FlutterBluePlusAndroid extends FlutterBluePlusPlatform {
       var args = arguments.toString();
       func = _logColor ? '\x1B[1;30m$func\x1B[0m' : func;
       args = _logColor ? '\x1B[1;35m$args\x1B[0m' : args;
-      print('[FBP] $func args: $args');
+      FlutterBluePlusPlatform.log('[FBP] $func args: $args');
     }
 
     // invoke
@@ -466,7 +466,7 @@ final class FlutterBluePlusAndroid extends FlutterBluePlusPlatform {
       var result = out.toString();
       func = _logColor ? '\x1B[1;30m$func\x1B[0m' : func;
       result = _logColor ? '\x1B[1;33m$result\x1B[0m' : result;
-      print('[FBP] $func result: $result');
+      FlutterBluePlusPlatform.log('[FBP] $func result: $result');
     }
 
     return out;
@@ -503,7 +503,7 @@ final class FlutterBluePlusAndroid extends FlutterBluePlusPlatform {
       };
       func = _logColor ? '\x1B[1;30m$func\x1B[0m' : func;
       result = _logColor ? '\x1B[1;33m$result\x1B[0m' : result;
-      print('[FBP] $func result: $result');
+      FlutterBluePlusPlatform.log('[FBP] $func result: $result');
     }
 
     // handle method call

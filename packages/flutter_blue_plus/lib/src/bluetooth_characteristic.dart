@@ -11,6 +11,9 @@ class BluetoothCharacteristic {
   final Guid serviceUuid;
   final Guid characteristicUuid;
   final Guid? primaryServiceUuid;
+
+  /// uniquely identifies this characteristic
+  /// on the platform native side
   final int? instanceId;
 
   BluetoothCharacteristic({
@@ -67,8 +70,8 @@ class BluetoothCharacteristic {
           .where((p) => p.serviceUuid == serviceUuid)
           .where((p) => p.characteristicUuid == characteristicUuid)
           .where((p) => p.primaryServiceUuid == primaryServiceUuid)
-          .where((p) => p.success == true)
           .where((p) => p.instanceId == null || p.instanceId == instanceId)
+          .where((p) => p.success == true)
           .map((c) => c.value)
           .newStreamWithInitialValue(lastValue);
 
@@ -80,8 +83,8 @@ class BluetoothCharacteristic {
       .where((p) => p.serviceUuid == serviceUuid)
       .where((p) => p.characteristicUuid == characteristicUuid)
       .where((p) => p.primaryServiceUuid == primaryServiceUuid)
-      .where((p) => p.success == true)
       .where((p) => p.instanceId == null || p.instanceId == instanceId)
+      .where((p) => p.success == true)
       .map((c) => c.value);
 
   /// return true if we're subscribed to this characteristic
@@ -192,11 +195,11 @@ class BluetoothCharacteristic {
         remoteId: remoteId,
         characteristicUuid: characteristicUuid,
         serviceUuid: serviceUuid,
+        primaryServiceUuid: primaryServiceUuid,
+        instanceId: instanceId,
         writeType: writeType,
         allowLongWrite: allowLongWrite,
         value: value,
-        primaryServiceUuid: primaryServiceUuid,
-        instanceId: instanceId,
       );
 
       var responseStream = FlutterBluePlusPlatform.instance.onCharacteristicWritten
@@ -256,10 +259,10 @@ class BluetoothCharacteristic {
         remoteId: remoteId,
         serviceUuid: serviceUuid,
         characteristicUuid: characteristicUuid,
-        forceIndications: forceIndications,
-        enable: notify,
         primaryServiceUuid: primaryServiceUuid,
         instanceId: instanceId,
+        forceIndications: forceIndications,
+        enable: notify,
       );
 
       // Notifications & Indications are configured by writing to the
@@ -333,10 +336,10 @@ class BluetoothCharacteristic {
         'serviceUuid: $serviceUuid, '
         'characteristicUuid: $characteristicUuid, '
         'primaryServiceUuid: $primaryServiceUuid, '
+        'instanceId: $instanceId'
         'descriptors: $descriptors, '
         'properties: $properties, '
         'value: $lastValue'
-        'instanceId: $instanceId'
         '}';
   }
 

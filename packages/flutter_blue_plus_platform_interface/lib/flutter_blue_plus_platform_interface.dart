@@ -83,6 +83,10 @@ abstract base class FlutterBluePlusPlatform {
     return Stream.empty();
   }
 
+  Stream<L2CapChannelData> get onL2CapChannelReceived {
+    return Stream.empty();
+  }
+
   Stream<BmBluetoothDevice> get onServicesReset {
     return Stream.empty();
   }
@@ -93,7 +97,7 @@ abstract base class FlutterBluePlusPlatform {
 
   static final _logsController = StreamController<String>.broadcast();
   static Stream<String> get logs => _logsController.stream;
-  
+
   static void log(String s) {
     _logsController.add(s);
     // ignore: avoid_print
@@ -205,7 +209,7 @@ abstract base class FlutterBluePlusPlatform {
     return Future.value(false);
   }
 
-  Future<void> listenL2CapChannel(
+  Future<int> listenL2CapChannel(
     ListenL2CapChannelRequest request,
   ) {
     throw UnimplementedError();

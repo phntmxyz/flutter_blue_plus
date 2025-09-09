@@ -16,6 +16,10 @@ dependencies:
   flutter_blue_plus_linux: 5.0.0
   flutter_blue_plus_web: 5.0.1
 
+dependency_overrides:
+  flutter_blue_plus_platform_interface:
+    path: ../flutter_blue_plus_platform_interface
+
 dev_dependencies:
   flutter_lints: ^5.0.0
   flutter_test:

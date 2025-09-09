@@ -98,6 +98,9 @@ class FlutterBluePlus {
   /// Get access to FBP logs
   static Stream<String> get logs => FlutterBluePlusPlatform.logs;
 
+  /// Stream of received L2CAP data (both client and server)
+  static Stream<L2CapChannelData> get onL2capReceived => FlutterBluePlusPlatform.instance.onL2CapChannelReceived;
+
   /// Set configurable options
   ///   - [showPowerAlert] Whether to show the power alert (iOS & MacOS only). i.e. CBCentralManagerOptionShowPowerAlertKey
   ///       To set this option you must call this method before any other method in this package.
@@ -411,6 +414,38 @@ class FlutterBluePlus {
     return await _invokeMethod(() => FlutterBluePlusPlatform.instance.getPhySupport(PhySupportRequest()));
   }
 
+  /// Listen for incoming L2CAP connections on a specific PSM
+  ///
+  /// [secure] - Whether to use a secure L2CAP channel
+  ///
+  /// Returns the PSM that was assigned for listening
+  static Future<int> listenL2capChannel({bool secure = true}) async {
+    // check platform support
+    if (kIsWeb) {
+      throw FlutterBluePlusException(
+          ErrorPlatform.fbp, "listenL2capChannel", FbpErrorCode.applePlatformOnly.index, "not supported on web");
+    }
+
+    return await _invokeMethod(() => FlutterBluePlusPlatform.instance.listenL2CapChannel(
+          ListenL2CapChannelRequest(secure: secure),
+        ));
+  }
+
+  /// Stop listening for L2CAP connections on a specific PSM
+  ///
+  /// [psm] - The PSM to stop listening on
+  static Future<void> stopListenL2capChannel(int psm) async {
+    // check platform support
+    if (kIsWeb) {
+      throw FlutterBluePlusException(
+          ErrorPlatform.fbp, "stopListenL2capChannel", FbpErrorCode.applePlatformOnly.index, "not supported on web");
+    }
+
+    await _invokeMethod(() => FlutterBluePlusPlatform.instance.stopListenL2CapChannel(
+          StopListenL2CapChannelRequest(psm: psm),
+        ));
+  }
+
   static Future<void> _initFlutterBluePlus() async {
     if (_initialized) {
       return;
@@ -475,7 +510,7 @@ class FlutterBluePlus {
                 var d = BluetoothDevice(remoteId: r.remoteId);
                 d.connect(autoConnect: true, mtu: null).onError((e, s) {
                   if (logLevel != LogLevel.none) {
-                     FlutterBluePlusPlatform.log("[FBP] [AutoConnect] connection failed: $e");
+                    FlutterBluePlusPlatform.log("[FBP] [AutoConnect] connection failed: $e");
                   }
                 });
               }
@@ -619,7 +654,6 @@ class FlutterBluePlus {
       await futureResponse.fbpTimeout(timeout, "turnOff");
     }
   }
-
 
   /// Checks if Bluetooth functionality is turned on
   @Deprecated('Use adapterState.first == BluetoothAdapterState.on instead')

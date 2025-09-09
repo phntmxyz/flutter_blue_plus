@@ -140,6 +140,14 @@ public class FlutterBluePlusPlugin implements
         invokeMethodUIThread("connectToL2CapChannel", deviceConnectedData);
     };
 
+    private final L2CapChannelManager.DataReceived dataReceivedCallback = (remoteDevice, psm, value) -> {
+        final HashMap<String, Object> data = new HashMap<>();
+        data.put("remote_id", remoteDevice.getAddress());
+        data.put("psm", psm);
+        data.put("value", value);
+        invokeMethodUIThread("OnL2CapChannelReceive", data);
+    };
+
     private interface OperationOnPermission {
         void op(boolean granted, String permission);
     }
@@ -338,7 +346,7 @@ public class FlutterBluePlusPlugin implements
                 return;
             }
             if (l2CapChannelManager == null) {
-                l2CapChannelManager = new L2CapChannelManager(mBluetoothAdapter, deviceConnectedCallback);
+                l2CapChannelManager = new L2CapChannelManager(mBluetoothAdapter, deviceConnectedCallback, dataReceivedCallback);
             }
 
             switch (call.method) {
@@ -3237,11 +3245,13 @@ public class FlutterBluePlusPlugin implements
 class L2CapChannelManager {
     private final BluetoothAdapter adapter;
     private final DeviceConnected deviceConnectedCallback;
+    private final DataReceived dataReceivedCallback;
     private final List<L2CapInfo> openL2CapChannelInfos = Collections.synchronizedList(new LinkedList<>());
 
-    public L2CapChannelManager(@NonNull final BluetoothAdapter adapter, @NonNull final DeviceConnected deviceConnectedCallback) {
+    public L2CapChannelManager(@NonNull final BluetoothAdapter adapter, @NonNull final DeviceConnected deviceConnectedCallback, @NonNull final DataReceived dataReceivedCallback) {
         this.adapter = adapter;
         this.deviceConnectedCallback = deviceConnectedCallback;
+        this.dataReceivedCallback = dataReceivedCallback;
     }
 
     @SuppressLint("MissingPermission")
@@ -3263,7 +3273,7 @@ class L2CapChannelManager {
             } else {
                 serverSocket = adapter.listenUsingInsecureL2capChannel();
             }
-            final ServerSocketInfo socketInfo = new ServerSocketInfo(serverSocket, deviceConnectedCallback);
+            final ServerSocketInfo socketInfo = new ServerSocketInfo(serverSocket, deviceConnectedCallback, dataReceivedCallback);
             openL2CapChannelInfos.add(socketInfo);
             final int psm = serverSocket.getPsm();
             socketInfo.acceptConnections();
@@ -3294,6 +3304,9 @@ class L2CapChannelManager {
         }
         final L2CapClientChannel l2CapChannel = ((L2CapClientChannel) l2CapInfo.getL2CapChannel(device));
         l2CapChannel.connectToL2CapChannel(secure, resultCallback);
+        // set data callback and start reader loop
+        l2CapChannel.setDataReceivedCallback(dataReceivedCallback);
+        l2CapChannel.startReaderLoop(psm);
     }
 
     public void read(String remoteId, int psm, final Result resultCallback) {
@@ -3385,6 +3398,10 @@ class L2CapChannelManager {
     public interface DeviceConnected {
         void deviceConnected(BluetoothDevice remoteDevice, int psm);
     }
+
+    public interface DataReceived {
+        void data(BluetoothDevice remoteDevice, int psm, byte[] value);
+    }
 }
 
 
@@ -3395,6 +3412,8 @@ abstract class L2CapChannel {
     protected BluetoothSocket socket;
     protected OutputStream outputStream;
     protected InputStream inputStream;
+    protected L2CapChannelManager.DataReceived dataReceivedCallback;
+    private volatile boolean readerRunning = false;
 
     public L2CapChannel(final int readBufferSize) {
         readBuffer = new byte[readBufferSize];
@@ -3402,6 +3421,33 @@ abstract class L2CapChannel {
 
     public BluetoothSocket getSocket() {
         return socket;
+    }
+
+    public void setDataReceivedCallback(L2CapChannelManager.DataReceived cb) {
+        this.dataReceivedCallback = cb;
+    }
+
+    public void startReaderLoop(final int psm) {
+        if (inputStream == null || socket == null) return;
+        readerRunning = true;
+        new Thread(() -> {
+            while (readerRunning && socket != null && socket.isConnected()) {
+                try {
+                    int available = inputStream.available();
+                    if (available <= 0) {
+                        try { Thread.sleep(20); } catch (InterruptedException ignored) {}
+                        continue;
+                    }
+                    int bytesRead = inputStream.read(readBuffer);
+                    if (bytesRead > 0 && dataReceivedCallback != null) {
+                        byte[] emit = Arrays.copyOf(readBuffer, bytesRead);
+                        dataReceivedCallback.data(socket.getRemoteDevice(), psm, emit);
+                    }
+                } catch (IOException e) {
+                    break;
+                }
+            }
+        }).start();
     }
 
     public void read(String remoteId, int psm, final Result resultCallback) {
@@ -3427,6 +3473,12 @@ abstract class L2CapChannel {
             responseData.put("bytes_read", bytesRead);
             responseData.put("value", readBuffer);
             resultCallback.success(responseData);
+
+            // push event
+            if (dataReceivedCallback != null && bytesRead > 0) {
+                byte[] emit = Arrays.copyOf(readBuffer, bytesRead);
+                dataReceivedCallback.data(socket.getRemoteDevice(), psm, emit);
+            }
         } catch (IOException e) {
             log(LogLevel.ERROR, e.getMessage());
             resultCallback.error("input_stream_read_failed", e.getMessage(), e);
@@ -3449,6 +3501,7 @@ abstract class L2CapChannel {
     }
 
     public synchronized void close() {
+        readerRunning = false;
         if (outputStream != null) {
             try {
                 outputStream.close();
@@ -3479,7 +3532,6 @@ abstract class L2CapChannel {
     }
 }
 
-
 class L2CapClientChannel extends L2CapChannel {
     private final BluetoothDevice device;
     private final int psm;
@@ -3506,6 +3558,8 @@ class L2CapClientChannel extends L2CapChannel {
             socket.connect();
             inputStream = socket.getInputStream();
             outputStream = socket.getOutputStream();
+            // set callback
+            setDataReceivedCallback(((L2CapChannelManager) null)); // placeholder
             resultCallback.success(null);
         } catch (IOException e) {
             log(LogLevel.ERROR, e.getMessage());
@@ -3597,11 +3651,13 @@ class ServerSocketInfo implements L2CapInfo {
     final BluetoothServerSocket serverSocket;
     private final List<L2CapServerChannel> openChannels;
     private final L2CapChannelManager.DeviceConnected deviceConnectedCallback;
+    private final L2CapChannelManager.DataReceived dataReceivedCallback;
     private boolean isAcceptingConnections;
 
-    public ServerSocketInfo(BluetoothServerSocket serverSocket, final L2CapChannelManager.DeviceConnected deviceConnectedCallback) {
+    public ServerSocketInfo(BluetoothServerSocket serverSocket, final L2CapChannelManager.DeviceConnected deviceConnectedCallback, final L2CapChannelManager.DataReceived dataReceivedCallback) {
         this.serverSocket = serverSocket;
         this.deviceConnectedCallback = deviceConnectedCallback;
+        this.dataReceivedCallback = dataReceivedCallback;
         openChannels = Collections.synchronizedList(new LinkedList<>());
         isAcceptingConnections = false;
     }
@@ -3652,6 +3708,8 @@ class ServerSocketInfo implements L2CapInfo {
                     }
                     final L2CapServerChannel l2capChannel = new L2CapServerChannel(socket);
                     l2capChannel.openStreams();
+                    l2capChannel.setDataReceivedCallback(dataReceivedCallback);
+                    l2capChannel.startReaderLoop(getPsm());
                     addConnection(l2capChannel);
                     deviceConnectedCallback.deviceConnected(socket.getRemoteDevice(), getPsm());
                 } catch (IOException e) {
@@ -3663,17 +3721,15 @@ class ServerSocketInfo implements L2CapInfo {
         }).start();
     }
 
-
     public void closeSocket() {
         for (L2CapServerChannel openChannel : openChannels) {
             openChannel.close();
         }
-        openChannels.clear();
-        isAcceptingConnections = false;
         try {
+            isAcceptingConnections = false;
             serverSocket.close();
         } catch (IOException e) {
-            Log.e(TAG, "Error while closing server socket.", e);
+            Log.e(TAG, "Closing server socket failed.", e);
         }
     }
 }

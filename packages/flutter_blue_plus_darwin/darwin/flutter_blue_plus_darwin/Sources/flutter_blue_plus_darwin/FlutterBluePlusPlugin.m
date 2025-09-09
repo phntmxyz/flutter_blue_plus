@@ -76,6 +76,10 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
 @property(nonatomic) NSMutableArray<L2CapChannelInfo *> *channels;
 @property(nonatomic) NSMutableDictionary<NSNumber *, CBPeripheralManager *> *peripheralManagers;
 @property(nonatomic) NSMutableDictionary<NSNumber *, CBMutableService *> *publishedServices;
+@property(nonatomic) NSMutableDictionary<NSString *, FlutterResult> *pendingOpenResults;
+@property(nonatomic) NSMutableDictionary<NSString *, NSNumber *> *pendingOpenRequestedPsm; // key: remoteId -> psm
+@property(nonatomic, copy) FlutterResult pendingListenResult;
+@property(nonatomic) BOOL pendingListenSecure;
 - (instancetype)initWithMethodChannel:(FlutterMethodChannel *)methodChannel plugin:(FlutterBluePlusPlugin *)plugin;
 - (void)handleOpenL2CapChannel:(FlutterMethodCall *)call result:(FlutterResult)result;
 - (void)handleCloseL2CapChannel:(FlutterMethodCall *)call result:(FlutterResult)result;
@@ -85,6 +89,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
 - (void)handleStopListenL2capChannel:(FlutterMethodCall *)call result:(FlutterResult)result;
 - (void)setupPeripheralDelegates:(FlutterBluePlusPlugin *)plugin;
 - (void)setupStreamsForChannel:(L2CapChannelInfo *)channelInfo;
+- (void)completePendingOpenForRemoteId:(NSString *)remoteId psm:(CBL2CAPPSM)psm error:(NSError *)error;
 @end
 
 @interface FlutterBluePlusPlugin ()
@@ -2357,7 +2362,11 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
 - (void)peripheral:(CBPeripheral *)peripheral didOpenL2CAPChannel:(CBL2CAPChannel *)channel error:(NSError *)error API_AVAILABLE(ios(11.0))
 {
     if (error) {
-        Log(LERROR, @"didOpenL2CAPChannel error: %@", error.localizedDescription);
+        Log(LERROR, @"didOpenL2CAPChannel error: %@ (%@, code=%ld)", error.localizedDescription, error.domain, (long)error.code);
+        // complete any pending open result with error
+        [self.l2CapChannelManager completePendingOpenForRemoteId:[[peripheral identifier] UUIDString]
+                                                             psm:channel.PSM
+                                                           error:error];
         return;
     }
     
@@ -2371,6 +2380,9 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     
     [self.l2CapChannelManager setupStreamsForChannel:channelInfo];
     
+    // complete any pending open result successfully
+    [self.l2CapChannelManager completePendingOpenForRemoteId:remoteId psm:channel.PSM error:nil];
+
     [self.methodChannel invokeMethod:@"OnL2CapChannelOpened" arguments:@{
         @"remote_id": remoteId,
         @"psm": @(channel.PSM)
@@ -2418,6 +2430,13 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
         self.channels = [[NSMutableArray alloc] init];
         self.peripheralManagers = [[NSMutableDictionary alloc] init];
         self.publishedServices = [[NSMutableDictionary alloc] init];
+        // Track pending client open requests keyed by "<remoteId>:<psm>"
+        if (!self.pendingOpenResults) {
+            self.pendingOpenResults = [[NSMutableDictionary alloc] init];
+        }
+        if (!self.pendingOpenRequestedPsm) {
+            self.pendingOpenRequestedPsm = [[NSMutableDictionary alloc] init];
+        }
     }
     return self;
 }
@@ -2443,13 +2462,50 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
                                       details:nil]);
             return;
         }
-        
+        // Defer the result until didOpenL2CAPChannel returns (success or error)
+        NSString *key = [NSString stringWithFormat:@"%@: %@", remoteId, psmValue];
+        self.pendingOpenResults[key] = [result copy];
+        self.pendingOpenRequestedPsm[remoteId] = psmValue;
         [peripheral openL2CAPChannel:[psmValue unsignedShortValue]];
-        result(nil);
     } else {
         result([FlutterError errorWithCode:@"openL2CapChannel" 
                                   message:@"L2CAP channels require iOS 11.0 or later" 
                                   details:nil]);
+    }
+}
+
+// Complete pending open request (called from plugin delegate)
+- (void)completePendingOpenForRemoteId:(NSString *)remoteId psm:(CBL2CAPPSM)psm error:(NSError *)error
+{
+    // Try exact key first
+    NSString *key = [NSString stringWithFormat:@"%@: %@", remoteId, @(psm)];
+    FlutterResult pending = self.pendingOpenResults[key];
+    // Fallback: use the originally requested PSM for this remoteId
+    if (!pending) {
+        NSNumber *requestedPsm = self.pendingOpenRequestedPsm[remoteId];
+        if (requestedPsm) {
+            key = [NSString stringWithFormat:@"%@: %@", remoteId, requestedPsm];
+            pending = self.pendingOpenResults[key];
+        }
+    }
+    // Last resort: find any pending key that matches remoteId prefix
+    if (!pending) {
+        for (NSString *k in self.pendingOpenResults.allKeys) {
+            if ([k hasPrefix:[NSString stringWithFormat:@"%@: ", remoteId]]) {
+                key = k;
+                pending = self.pendingOpenResults[k];
+                break;
+            }
+        }
+    }
+    if (pending) {
+        [self.pendingOpenResults removeObjectForKey:key];
+        [self.pendingOpenRequestedPsm removeObjectForKey:remoteId];
+        if (error) {
+            pending([FlutterError errorWithCode:@"openL2CapChannel" message:error.localizedDescription details:@(error.code)]);
+        } else {
+            pending(nil);
+        }
     }
 }
 
@@ -2478,6 +2534,11 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     NSNumber *psmValue = args[@"psm"];
     
     L2CapChannelInfo *channelInfo = [self findChannelByRemoteId:remoteId psm:psmValue];
+    
+    // If not found with the provided remoteId, try looking for server-side channel
+    if (!channelInfo) {
+        channelInfo = [self findChannelByRemoteId:@"server" psm:psmValue];
+    }
     if (channelInfo && channelInfo.readBuffer.length > 0) {
         NSData *data = [NSData dataWithData:channelInfo.readBuffer];
         [channelInfo.readBuffer setLength:0];
@@ -2495,6 +2556,13 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     FlutterStandardTypedData *valueData = args[@"value"];
     
     L2CapChannelInfo *channelInfo = [self findChannelByRemoteId:remoteId psm:psmValue];
+    
+    // If not found with the provided remoteId, try looking for server-side channel
+    if (!channelInfo) {
+        channelInfo = [self findChannelByRemoteId:@"server" psm:psmValue];
+        NSLog(@"Searching for server channel with PSM: %@, found: %@", psmValue, channelInfo ? @"YES" : @"NO");
+    }
+    
     if (channelInfo && channelInfo.channel && channelInfo.channel.outputStream) {
         NSOutputStream *outputStream = channelInfo.channel.outputStream;
         if (outputStream.hasSpaceAvailable) {
@@ -2524,14 +2592,17 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
         NSDictionary *args = call.arguments;
         NSNumber *secure = args[@"secure"];
         
-        CBPeripheralManager *peripheralManager = [[CBPeripheralManager alloc] initWithDelegate:self queue:nil];
+        // Store the result callback and settings to be used when peripheral manager is ready
+        self.pendingListenResult = result;
+        self.pendingListenSecure = [secure boolValue];
         
-        [peripheralManager publishL2CAPChannelWithEncryption:[secure boolValue]];
+        CBPeripheralManager *peripheralManager = [[CBPeripheralManager alloc] initWithDelegate:self queue:nil];
         
         NSNumber *psmPlaceholder = @(0);
         self.peripheralManagers[psmPlaceholder] = peripheralManager;
         
-        result(@{@"psm": psmPlaceholder});
+        // Publishing will happen in peripheralManagerDidUpdateState when state is poweredOn
+        // Don't call result here - wait for didPublishL2CAPChannel callback
     } else {
         result([FlutterError errorWithCode:@"listenL2capChannel" 
                                   message:@"L2CAP channels require iOS 11.0 or later" 
@@ -2576,12 +2647,33 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
 
 - (void)peripheralManagerDidUpdateState:(CBPeripheralManager *)peripheral
 {
+    NSLog(@"Peripheral manager state updated: %ld", (long)peripheral.state);
+    
+    if (@available(iOS 11.0, *)) {
+        if (peripheral.state == CBManagerStatePoweredOn && self.pendingListenResult) {
+            NSLog(@"Publishing L2CAP channel with encryption: %@", self.pendingListenSecure ? @"YES" : @"NO");
+            [peripheral publishL2CAPChannelWithEncryption:self.pendingListenSecure];
+        } else if (peripheral.state != CBManagerStatePoweredOn && self.pendingListenResult) {
+            // If peripheral manager is not powered on, return error
+            NSString *errorMessage = [NSString stringWithFormat:@"Bluetooth peripheral manager not ready (state: %ld)", (long)peripheral.state];
+            self.pendingListenResult([FlutterError errorWithCode:@"listenL2capChannel" 
+                                                         message:errorMessage 
+                                                         details:nil]);
+            self.pendingListenResult = nil;
+        }
+    }
 }
 
 - (void)peripheralManager:(CBPeripheralManager *)peripheral didPublishL2CAPChannel:(CBL2CAPPSM)PSM error:(NSError *)error API_AVAILABLE(ios(11.0))
 {
     if (error) {
         NSLog(@"Failed to publish L2CAP channel: %@", error.localizedDescription);
+        if (self.pendingListenResult) {
+            self.pendingListenResult([FlutterError errorWithCode:@"listenL2capChannel" 
+                                                         message:error.localizedDescription 
+                                                         details:nil]);
+            self.pendingListenResult = nil;
+        }
         return;
     }
     
@@ -2589,7 +2681,41 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     self.peripheralManagers[psmValue] = peripheral;
     [self.peripheralManagers removeObjectForKey:@(0)];
     
+    // Call the pending result callback with the actual PSM
+    if (self.pendingListenResult) {
+        self.pendingListenResult(@{@"psm": psmValue});
+        self.pendingListenResult = nil;
+    }
+    
     [self.methodChannel invokeMethod:@"OnL2CapChannelPublished" arguments:@{@"psm": psmValue}];
+}
+
+- (void)peripheralManager:(CBPeripheralManager *)peripheral didOpenL2CAPChannel:(CBL2CAPChannel *)channel error:(NSError *)error API_AVAILABLE(ios(11.0))
+{
+    if (error) {
+        NSLog(@"Failed to open L2CAP channel: %@", error.localizedDescription);
+        return;
+    }
+    
+    // Get the PSM from the channel's input stream
+    CBL2CAPPSM psm = channel.PSM;
+    
+    NSLog(@"L2CAP channel opened on server - PSM: %d", (int)psm);
+    
+    // Create channel info for the incoming connection
+    // For server side, we use a generic remote ID since we don't know the specific peripheral
+    NSString *serverRemoteId = @"server";
+    L2CapChannelInfo *channelInfo = [[L2CapChannelInfo alloc] initWithPsm:@(psm) 
+                                                                   remoteId:serverRemoteId 
+                                                                    channel:channel];
+    
+    // Set up streams for the channel
+    [self setupStreamsForChannel:channelInfo];
+    
+    // Add to channels array
+    [self.channels addObject:channelInfo];
+    
+    NSLog(@"L2CAP server channel ready for PSM: %d", (int)psm);
 }
 
 - (void)peripheralManager:(CBPeripheralManager *)peripheral didUnpublishL2CAPChannel:(CBL2CAPPSM)PSM error:(NSError *)error API_AVAILABLE(ios(11.0))
@@ -2601,39 +2727,21 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     [self.methodChannel invokeMethod:@"OnL2CapChannelUnpublished" arguments:@{@"psm": @(PSM)}];
 }
 
-- (void)peripheralManager:(CBPeripheralManager *)peripheral didOpenL2CAPChannel:(CBL2CAPChannel *)channel error:(NSError *)error API_AVAILABLE(ios(11.0))
-{
-    if (error) {
-        NSLog(@"Failed to open L2CAP channel: %@", error.localizedDescription);
-        return;
-    }
-    
-    L2CapChannelInfo *channelInfo = [[L2CapChannelInfo alloc] initWithPsm:@(channel.PSM) 
-                                                                  remoteId:@"server"
-                                                                   channel:channel];
-    [self.channels addObject:channelInfo];
-    
-    [self setupStreamsForChannel:channelInfo];
-    
-    [self.methodChannel invokeMethod:@"OnL2CapChannelOpened" arguments:@{
-        @"remote_id": @"server",
-        @"psm": @(channel.PSM)
-    }];
-}
-
 - (void)setupStreamsForChannel:(L2CapChannelInfo *)channelInfo
 {
     if (@available(iOS 11.0, *)) {
         CBL2CAPChannel *channel = channelInfo.channel;
-        
-        channel.inputStream.delegate = (id<NSStreamDelegate>)self;
-        channel.outputStream.delegate = (id<NSStreamDelegate>)self;
-        
-        [channel.inputStream scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
-        [channel.outputStream scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
-        
-        [channel.inputStream open];
-        [channel.outputStream open];
+        // Ensure stream setup happens on the main run loop to avoid xpc_fd_dup errors
+        dispatch_async(dispatch_get_main_queue(), ^{
+            channel.inputStream.delegate = (id<NSStreamDelegate>)self;
+            channel.outputStream.delegate = (id<NSStreamDelegate>)self;
+
+            [channel.inputStream scheduleInRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+            [channel.outputStream scheduleInRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+
+            [channel.inputStream open];
+            [channel.outputStream open];
+        });
     }
 }
 

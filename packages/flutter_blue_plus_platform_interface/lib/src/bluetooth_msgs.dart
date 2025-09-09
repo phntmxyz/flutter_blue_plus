@@ -1138,6 +1138,22 @@ class WriteL2CapChannelRequest {
   }
 }
 
+class L2CapChannelData {
+  final DeviceIdentifier remoteId;
+  final int psm;
+  final List<int> value;
+
+  L2CapChannelData({required this.remoteId, required this.psm, required this.value});
+
+  factory L2CapChannelData.fromMap(Map<dynamic, dynamic> map) {
+    return L2CapChannelData(
+      remoteId: DeviceIdentifier(map['remote_id']),
+      psm: map['psm'],
+      value: Uint8List.fromList(map['value']),
+    );
+  }
+}
+
 // random number defined by flutter blue plus.
 // Ideally it should not conflict with iOS or Android error codes.
 int bmUserCanceledErrorCode = 23789258;

@@ -25,6 +25,7 @@
 /pubspec.lock
 /example/pubspec.lock
 /example/ios/Podfile.lock
+packages/**/pubspec.lock
 **/doc/api/
 .dart_tool/
 .packages

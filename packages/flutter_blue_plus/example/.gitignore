@@ -26,10 +26,16 @@
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
+.metadata
 .packages
 .pub-cache/
 .pub/
 /build/
+pubspec.lock
+
+# Flutter ephemeral files
+**/Flutter/ephemeral/
+**/flutter/ephemeral/
 
 # Web related
 lib/generated_plugin_registrant.dart
@@ -44,3 +50,33 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# iOS related
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ios/.symlinks/
+ios/Flutter/App.framework
+ios/Pods/
+ios/Podfile.lock
+ios/**/xcuserdata/
+ios/**/*.xcuserstate
+
+# macOS related
+macos/Flutter/ephemeral/
+macos/Pods/
+macos/Podfile.lock
+macos/**/xcuserdata/
+macos/**/*.xcuserstate
+
+# Linux related
+linux/flutter/ephemeral/.plugin_symlinks/
+
+# Android related
+android/.gradle/
+android/captures/
+android/gradlew
+android/gradlew.bat
+android/local.properties
+android/**/GeneratedPluginRegistrant.java

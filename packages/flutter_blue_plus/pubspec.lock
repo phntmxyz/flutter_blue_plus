@@ -89,26 +89,23 @@ packages:
   flutter_blue_plus_android:
     dependency: "direct main"
     description:
-      name: flutter_blue_plus_android
-      sha256: "1448207f7a9c25cb58867d9d698e5028618ced2385944e9f24cabe6f1bab693e"
-      url: "https://pub.dev"
-    source: hosted
+      path: "../flutter_blue_plus_android"
+      relative: true
+    source: path
     version: "5.0.3"
   flutter_blue_plus_darwin:
     dependency: "direct main"
     description:
-      name: flutter_blue_plus_darwin
-      sha256: e005b295c183eff3339cf5472a27e917a5721aca245e956ef49617246d3c0bee
-      url: "https://pub.dev"
-    source: hosted
+      path: "../flutter_blue_plus_darwin"
+      relative: true
+    source: path
     version: "5.0.1"
   flutter_blue_plus_linux:
     dependency: "direct main"
     description:
-      name: flutter_blue_plus_linux
-      sha256: "450aa1d5a518dcccdaca1ef4e873e402186aae8fa26e29b5189ae544cbd5e75d"
-      url: "https://pub.dev"
-    source: hosted
+      path: "../flutter_blue_plus_linux"
+      relative: true
+    source: path
     version: "5.0.0"
   flutter_blue_plus_platform_interface:
     dependency: "direct main"
@@ -120,10 +117,9 @@ packages:
   flutter_blue_plus_web:
     dependency: "direct main"
     description:
-      name: flutter_blue_plus_web
-      sha256: ccaa61e8694a2547b9949b341f637b318c910cc50975717c24d4340ce3fe4872
-      url: "https://pub.dev"
-    source: hosted
+      path: "../flutter_blue_plus_web"
+      relative: true
+    source: path
     version: "5.0.1"
   flutter_lints:
     dependency: "direct dev"
@@ -310,4 +306,4 @@ packages:
     version: "6.6.1"
 sdks:
   dart: ">=3.8.0 <4.0.0"
-  flutter: ">=3.19.0"
+  flutter: ">=3.18.0-18.0.pre.54"

@@ -4,13 +4,58 @@
 
 part of '../flutter_blue_plus.dart';
 
+/// Represents an L2CAP (Logical Link Control and Adaptation Protocol) channel 
+/// for communication with a Bluetooth device.
+///
+/// L2CAP is a protocol in the Bluetooth protocol stack that handles multiplexing, 
+/// segmentation and reassembly, and error detection and recovery for higher level protocols.
+/// It provides connection-oriented and connectionless data services to upper layer protocols.
+///
+/// This class provides methods to read, write, and manage L2CAP channel communication.
+///
+/// Example usage:
+/// ```dart
+/// // Open an L2CAP channel
+/// BluetoothL2capChannel channel = await device.openL2CapChannel(1234);
+/// 
+/// // Write data to the channel
+/// await channel.write([0x01, 0x02, 0x03]);
+/// 
+/// // Read data from the channel
+/// List<int> data = await channel.read();
+/// 
+/// // Close the channel when done
+/// await channel.close();
+/// ```
 class BluetoothL2capChannel {
+  /// The device identifier for the connected Bluetooth device
   final DeviceIdentifier deviceId;
+  
+  /// The Protocol Service Multiplexer (PSM) value for this L2CAP channel.
+  /// PSM values are used to distinguish between different services/protocols
+  /// running over L2CAP on the same device.
   final int psm;
 
+  /// Creates a new [BluetoothL2capChannel] instance.
+  ///
+  /// [deviceId] - The identifier of the Bluetooth device
+  /// [psm] - The Protocol Service Multiplexer value for this channel
   BluetoothL2capChannel({required this.deviceId, required this.psm});
 
-  /// Write data to the L2CAP channel
+  /// Writes data to the L2CAP channel.
+  ///
+  /// Sends the provided [data] bytes to the remote device over this L2CAP channel.
+  /// The data is transmitted as-is without any additional framing or headers.
+  ///
+  /// [data] - The bytes to send. Can be any list of integers (0-255).
+  ///
+  /// Throws [FlutterBluePlusException] if the write operation fails or 
+  /// the channel is not open.
+  ///
+  /// Example:
+  /// ```dart
+  /// await channel.write([0x48, 0x65, 0x6C, 0x6C, 0x6F]); // "Hello" in ASCII
+  /// ```
   Future<void> write(List<int> data) async {
     await FlutterBluePlus._invokeMethod(() => FlutterBluePlusPlatform.instance.writeL2CapChannel(
       WriteL2CapChannelRequest(
@@ -21,14 +66,48 @@ class BluetoothL2capChannel {
     ));
   }
 
-  /// Read data from the L2CAP channel
+  /// Reads data from the L2CAP channel.
+  ///
+  /// Attempts to read data that has been received on this L2CAP channel.
+  /// This is a blocking operation that waits for data to become available.
+  ///
+  /// Returns a [List<int>] containing the received bytes. The list may be
+  /// empty if no data is available.
+  ///
+  /// Throws [FlutterBluePlusException] if the read operation fails or 
+  /// the channel is not open.
+  ///
+  /// Note: For real-time data reception, consider using [FlutterBluePlus.onL2capReceived]
+  /// stream instead of polling with this method.
+  ///
+  /// Example:
+  /// ```dart
+  /// List<int> receivedData = await channel.read();
+  /// print('Received ${receivedData.length} bytes');
+  /// ```
   Future<List<int>> read() async {
     return await FlutterBluePlus._invokeMethod(() => FlutterBluePlusPlatform.instance.readL2CapChannel(
       ReadL2CapChannelRequest(remoteId: deviceId.str, psm: psm),
     ));
   }
 
-  /// Close the L2CAP channel
+  /// Closes the L2CAP channel.
+  ///
+  /// Terminates the L2CAP channel connection with the remote device.
+  /// After calling this method, the channel can no longer be used for
+  /// reading or writing data.
+  ///
+  /// It's important to close channels when they are no longer needed to
+  /// free up system resources and allow the remote device to clean up
+  /// its resources as well.
+  ///
+  /// Throws [FlutterBluePlusException] if the close operation fails.
+  ///
+  /// Example:
+  /// ```dart
+  /// // Always close channels when done
+  /// await channel.close();
+  /// ```
   Future<void> close() async {
     await FlutterBluePlus._invokeMethod(() => FlutterBluePlusPlatform.instance.closeL2CapChannel(
       CloseL2CapChannelRequest(remoteId: deviceId.str, psm: psm),

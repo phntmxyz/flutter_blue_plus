@@ -693,12 +693,47 @@ class BluetoothDevice {
         '}';
   }
 
-  /// Open an L2CAP channel to this device
+  /// Opens an L2CAP (Logical Link Control and Adaptation Protocol) channel to this device.
   ///
-  /// [psm] - The Protocol Service Multiplexer (PSM) to connect to
-  /// [secure] - Whether to use a secure L2CAP channel
+  /// L2CAP provides a way to establish reliable, connection-oriented communication
+  /// channels over Bluetooth. This is useful for custom protocols that need more
+  /// control than standard Bluetooth profiles provide.
   ///
-  /// Returns a [BluetoothL2capChannel] for data transfer
+  /// The device must be connected before calling this method. The method will
+  /// establish an L2CAP channel using the specified PSM (Protocol Service Multiplexer).
+  ///
+  /// **Parameters:**
+  /// - [psm] - The Protocol Service Multiplexer value to connect to. This identifies
+  ///   the specific service or protocol on the remote device. PSM values are typically
+  ///   odd numbers between 0x1001 and 0xFFFF for dynamically assigned services.
+  /// - [secure] - Whether to use a secure L2CAP channel (default: true)
+  ///   - **Android**: Uses `createL2capChannel()` vs `createInsecureL2capChannel()`
+  ///   - **iOS**: Security is controlled by the server's `publishL2CAPChannelWithEncryption` setting
+  ///
+  /// **Returns:** A [BluetoothL2capChannel] instance for reading and writing data.
+  ///
+  /// **Throws:**
+  /// - [FlutterBluePlusException] if the device is not connected
+  /// - [FlutterBluePlusException] if the platform doesn't support L2CAP (e.g., Web)
+  /// - [FlutterBluePlusException] if the channel cannot be opened
+  ///
+  /// **Platform Support:** Android and iOS only (not supported on Web)
+  ///
+  /// **Example:**
+  /// ```dart
+  /// // Ensure device is connected
+  /// await device.connect();
+  /// 
+  /// // Open a secure L2CAP channel on PSM 1234
+  /// BluetoothL2capChannel channel = await device.openL2CapChannel(1234);
+  /// 
+  /// // Use the channel for communication
+  /// await channel.write([0x01, 0x02, 0x03]);
+  /// List<int> response = await channel.read();
+  /// 
+  /// // Always close the channel when done
+  /// await channel.close();
+  /// ```
   Future<BluetoothL2capChannel> openL2CapChannel(int psm, {bool secure = true}) async {
     // check connected
     if (isDisconnected) {

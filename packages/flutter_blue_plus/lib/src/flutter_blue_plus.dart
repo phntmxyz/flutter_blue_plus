@@ -98,7 +98,31 @@ class FlutterBluePlus {
   /// Get access to FBP logs
   static Stream<String> get logs => FlutterBluePlusPlatform.logs;
 
-  /// Stream of received L2CAP data (both client and server)
+  /// Stream of received L2CAP data from all channels (both client and server).
+  ///
+  /// This stream provides real-time notifications whenever data is received
+  /// on any L2CAP channel, whether it's a client channel (opened via 
+  /// [BluetoothDevice.openL2CapChannel]) or a server channel (accepting
+  /// connections via [listenL2capChannel]).
+  ///
+  /// Each [L2CapChannelData] object contains:
+  /// - [remoteId] - The device that sent the data
+  /// - [psm] - The Protocol Service Multiplexer identifying the channel
+  /// - [value] - The received data bytes
+  ///
+  /// This is the preferred method for handling incoming L2CAP data as it
+  /// provides immediate notification without the need to poll with
+  /// [BluetoothL2capChannel.read].
+  ///
+  /// **Example:**
+  /// ```dart
+  /// // Listen for all L2CAP data
+  /// FlutterBluePlus.onL2capReceived.listen((data) {
+  ///   print('Received ${data.value.length} bytes from ${data.remoteId} on PSM ${data.psm}');
+  ///   // Process the received data
+  ///   handleL2CapData(data);
+  /// });
+  /// ```
   static Stream<L2CapChannelData> get onL2capReceived => FlutterBluePlusPlatform.instance.onL2CapChannelReceived;
 
   /// Set configurable options
@@ -414,11 +438,47 @@ class FlutterBluePlus {
     return await _invokeMethod(() => FlutterBluePlusPlatform.instance.getPhySupport(PhySupportRequest()));
   }
 
-  /// Listen for incoming L2CAP connections on a specific PSM
+  /// Starts listening for incoming L2CAP connections, creating an L2CAP server.
   ///
-  /// [secure] - Whether to use a secure L2CAP channel
+  /// This method sets up the device to accept incoming L2CAP connections from
+  /// remote devices. When a remote device connects to this server, you can
+  /// receive the connection event and handle data communication.
   ///
-  /// Returns the PSM that was assigned for listening
+  /// The system will automatically assign a PSM (Protocol Service Multiplexer)
+  /// value for this server. You need to advertise this PSM to remote devices
+  /// so they can connect using [BluetoothDevice.openL2CapChannel].
+  ///
+  /// **Parameters:**
+  /// - [secure] - Whether to use a secure L2CAP server (default: true)
+  ///   - **Android**: Uses `listenUsingL2capChannel()` vs `listenUsingInsecureL2capChannel()`
+  ///   - **iOS**: Uses `publishL2CAPChannelWithEncryption(secure)`
+  ///
+  /// **Returns:** The PSM value assigned to this server. Share this value with
+  /// remote devices so they can connect to your server.
+  ///
+  /// **Throws:**
+  /// - [FlutterBluePlusException] if the platform doesn't support L2CAP (e.g., Web)
+  /// - [FlutterBluePlusException] if the server cannot be started
+  ///
+  /// **Platform Support:** Android and iOS only (not supported on Web)
+  ///
+  /// **Example:**
+  /// ```dart
+  /// // Start listening for L2CAP connections
+  /// int serverPsm = await FlutterBluePlus.listenL2capChannel(secure: true);
+  /// print('L2CAP server listening on PSM: $serverPsm');
+  /// 
+  /// // Listen for incoming data
+  /// FlutterBluePlus.onL2capReceived.listen((data) {
+  ///   if (data.psm == serverPsm) {
+  ///     print('Server received data: ${data.value}');
+  ///     // Handle server data
+  ///   }
+  /// });
+  /// 
+  /// // Remember to stop the server when done
+  /// await FlutterBluePlus.stopL2capServer(serverPsm);
+  /// ```
   static Future<int> listenL2capChannel({bool secure = true}) async {
     // check platform support
     if (kIsWeb) {
@@ -431,9 +491,37 @@ class FlutterBluePlus {
         ));
   }
 
-  /// Stop listening for L2CAP connections on a specific PSM
+  /// Stops the L2CAP server listening on the specified PSM.
   ///
-  /// [psm] - The PSM to stop listening on
+  /// This method terminates an L2CAP server that was previously started with
+  /// [listenL2capChannel]. After calling this method, the server will no longer
+  /// accept new connections on the specified PSM, and any existing connections
+  /// on that PSM may be closed.
+  ///
+  /// It's important to stop L2CAP servers when they are no longer needed to
+  /// free up system resources and PSM values.
+  ///
+  /// **Parameters:**
+  /// - [psm] - The Protocol Service Multiplexer value returned by [listenL2capChannel]
+  ///   that identifies the server to stop.
+  ///
+  /// **Throws:**
+  /// - [FlutterBluePlusException] if the platform doesn't support L2CAP (e.g., Web)
+  /// - [FlutterBluePlusException] if the server cannot be stopped or doesn't exist
+  ///
+  /// **Platform Support:** Android and iOS only (not supported on Web)
+  ///
+  /// **Example:**
+  /// ```dart
+  /// // Start an L2CAP server
+  /// int serverPsm = await FlutterBluePlus.listenL2capChannel();
+  /// 
+  /// // ... use the server ...
+  /// 
+  /// // Stop the server when done
+  /// await FlutterBluePlus.stopL2capServer(serverPsm);
+  /// print('L2CAP server on PSM $serverPsm has been stopped');
+  /// ```
   static Future<void> stopL2capServer(int psm) async {
     // check platform support
     if (kIsWeb) {

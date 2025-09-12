@@ -2447,7 +2447,14 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
         NSDictionary *args = call.arguments;
         NSString *remoteId = args[@"remote_id"];
         NSNumber *psmValue = args[@"psm"];
+        NSNumber *secure = args[@"secure"];  // Extract secure parameter for validation
         CBPeripheral *peripheral = [self findPeripheralById:remoteId];
+        
+        // Note: iOS Core Bluetooth openL2CAPChannel does not have a security parameter.
+        // Security is controlled by the peripheral when publishing the channel with
+        // publishL2CAPChannelWithEncryption. The secure parameter is acknowledged but 
+        // cannot be enforced on the client side - it depends on the server's configuration.
+        NSLog(@"Opening L2CAP channel with requested security: %@ (Note: iOS client security controlled by server)", secure ? @"secure" : @"insecure");
         
         if (peripheral == nil) {
             result([FlutterError errorWithCode:@"openL2CapChannel" 

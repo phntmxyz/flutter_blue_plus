@@ -1016,20 +1016,38 @@ class PhySupport {
   }
 }
 
+/// Represents an L2CAP channel connection event.
+///
+/// This class is used internally to handle L2CAP channel connection events
+/// from the platform layer. It contains information about which device
+/// connected and on which PSM.
 class L2CapChannelConnected {
+  /// The device identifier of the remote device that connected
   final DeviceIdentifier remoteId;
+  
+  /// The Protocol Service Multiplexer (PSM) of the connected channel
   final int psm;
 
+  /// Creates an [L2CapChannelConnected] from a platform message map
   L2CapChannelConnected.fromMap(Map<dynamic, dynamic> map)
       : remoteId = DeviceIdentifier(map['remote_id']),
         psm = map['psm'];
 }
 
+/// Request message for starting an L2CAP server.
+///
+/// Used internally to communicate with the platform layer when
+/// [FlutterBluePlus.listenL2capChannel] is called.
 class ListenL2CapChannelRequest {
+  /// Whether to use a secure L2CAP channel
+  /// - Android: Uses listenUsingL2capChannel() vs listenUsingInsecureL2capChannel()
+  /// - iOS: Uses publishL2CAPChannelWithEncryption(secure)
   final bool secure;
 
+  /// Creates a new [ListenL2CapChannelRequest]
   ListenL2CapChannelRequest({required this.secure});
 
+  /// Converts this request to a map for platform communication
   Map<dynamic, dynamic> toMap() {
     return {
       'secure': secure,
@@ -1037,17 +1055,30 @@ class ListenL2CapChannelRequest {
   }
 }
 
+/// Response message from starting an L2CAP server.
+///
+/// Contains the PSM (Protocol Service Multiplexer) assigned by the system
+/// for the newly created L2CAP server.
 class ListenL2CapChannelResponse {
+  /// The PSM assigned to the L2CAP server
   final int psm;
 
+  /// Creates a [ListenL2CapChannelResponse] from a platform message map
   ListenL2CapChannelResponse.fromMap(Map<dynamic, dynamic> map) : psm = map['psm'];
 }
 
+/// Request message for stopping an L2CAP server.
+///
+/// Used internally to communicate with the platform layer when
+/// [FlutterBluePlus.stopL2capServer] is called.
 class StopListenL2CapChannelRequest {
+  /// The PSM of the L2CAP server to stop
   final int psm;
 
+  /// Creates a new [StopListenL2CapChannelRequest]
   StopListenL2CapChannelRequest({required this.psm});
 
+  /// Converts this request to a map for platform communication
   Map<dynamic, dynamic> toMap() {
     return {
       'psm': psm,
@@ -1055,11 +1086,23 @@ class StopListenL2CapChannelRequest {
   }
 }
 
+/// Request message for opening an L2CAP channel to a device.
+///
+/// Used internally to communicate with the platform layer when
+/// [BluetoothDevice.openL2CapChannel] is called.
 class OpenL2CapChannelRequest {
+  /// The device identifier of the target device
   final String remoteId;
+  
+  /// The PSM to connect to on the remote device
   final int psm;
+  
+  /// Whether to use a secure L2CAP channel
+  /// - Android: Uses createL2capChannel() vs createInsecureL2capChannel()
+  /// - iOS: Security controlled by server's publishL2CAPChannelWithEncryption setting
   final bool secure;
 
+  /// Creates a new [OpenL2CapChannelRequest]
   OpenL2CapChannelRequest({
     required this.remoteId,
     required this.psm,
@@ -1075,10 +1118,18 @@ class OpenL2CapChannelRequest {
   }
 }
 
+/// Request message for closing an L2CAP channel.
+///
+/// Used internally to communicate with the platform layer when
+/// [BluetoothL2capChannel.close] is called.
 class CloseL2CapChannelRequest {
+  /// The device identifier of the remote device
   final String remoteId;
+  
+  /// The PSM of the channel to close
   final int psm;
 
+  /// Creates a new [CloseL2CapChannelRequest]
   CloseL2CapChannelRequest({
     required this.remoteId,
     required this.psm,
@@ -1092,10 +1143,18 @@ class CloseL2CapChannelRequest {
   }
 }
 
+/// Request message for reading data from an L2CAP channel.
+///
+/// Used internally to communicate with the platform layer when
+/// [BluetoothL2capChannel.read] is called.
 class ReadL2CapChannelRequest {
+  /// The device identifier of the remote device
   final String remoteId;
+  
+  /// The PSM of the channel to read from
   final int psm;
 
+  /// Creates a new [ReadL2CapChannelRequest]
   ReadL2CapChannelRequest({
     required this.remoteId,
     required this.psm,
@@ -1109,12 +1168,24 @@ class ReadL2CapChannelRequest {
   }
 }
 
+/// Response message from reading an L2CAP channel.
+///
+/// Contains the data that was read from the L2CAP channel along with
+/// metadata about the read operation.
 class ReadL2CapChannelResponse {
+  /// The device identifier of the remote device
   final String remoteId;
+  
+  /// The PSM of the channel that was read from
   final int psm;
+  
+  /// The number of bytes that were read
   final int bytesRead;
+  
+  /// The actual data bytes that were read
   final List<int> value;
 
+  /// Creates a [ReadL2CapChannelResponse] from a platform message map
   ReadL2CapChannelResponse.fromMap(Map<dynamic, dynamic> map)
       : remoteId = map['remote_id'],
         psm = map['psm'],
@@ -1122,11 +1193,21 @@ class ReadL2CapChannelResponse {
         value = Uint8List.fromList(map['value']);
 }
 
+/// Request message for writing data to an L2CAP channel.
+///
+/// Used internally to communicate with the platform layer when
+/// [BluetoothL2capChannel.write] is called.
 class WriteL2CapChannelRequest {
+  /// The device identifier of the remote device
   final String remoteId;
+  
+  /// The PSM of the channel to write to
   final int psm;
+  
+  /// The data bytes to write
   final List<int> value;
 
+  /// Creates a new [WriteL2CapChannelRequest]
   WriteL2CapChannelRequest({required this.remoteId, required this.psm, required this.value});
 
   Map<dynamic, dynamic> toMap() {
@@ -1138,13 +1219,33 @@ class WriteL2CapChannelRequest {
   }
 }
 
+/// Represents data received on an L2CAP channel.
+///
+/// This class is used by [FlutterBluePlus.onL2capReceived] to deliver
+/// L2CAP data that was received from remote devices. It contains the
+/// source device, channel information, and the actual data bytes.
+///
+/// Example usage:
+/// ```dart
+/// FlutterBluePlus.onL2capReceived.listen((L2CapChannelData data) {
+///   print('Received ${data.value.length} bytes from ${data.remoteId} on PSM ${data.psm}');
+///   // Process the data...
+/// });
+/// ```
 class L2CapChannelData {
+  /// The device identifier of the device that sent this data
   final DeviceIdentifier remoteId;
+  
+  /// The PSM (Protocol Service Multiplexer) of the channel this data was received on
   final int psm;
+  
+  /// The actual data bytes that were received
   final List<int> value;
 
+  /// Creates a new [L2CapChannelData] instance
   L2CapChannelData({required this.remoteId, required this.psm, required this.value});
 
+  /// Creates an [L2CapChannelData] from a platform message map
   factory L2CapChannelData.fromMap(Map<dynamic, dynamic> map) {
     return L2CapChannelData(
       remoteId: DeviceIdentifier(map['remote_id']),

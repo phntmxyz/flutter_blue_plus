@@ -434,14 +434,14 @@ class FlutterBluePlus {
   /// Stop listening for L2CAP connections on a specific PSM
   ///
   /// [psm] - The PSM to stop listening on
-  static Future<void> stopListenL2capChannel(int psm) async {
+  static Future<void> stopL2capServer(int psm) async {
     // check platform support
     if (kIsWeb) {
       throw FlutterBluePlusException(
-          ErrorPlatform.fbp, "stopListenL2capChannel", FbpErrorCode.applePlatformOnly.index, "not supported on web");
+          ErrorPlatform.fbp, "stopL2capServer", FbpErrorCode.applePlatformOnly.index, "not supported on web");
     }
 
-    await _invokeMethod(() => FlutterBluePlusPlatform.instance.stopListenL2CapChannel(
+    await _invokeMethod(() => FlutterBluePlusPlatform.instance.stopL2capServer(
           StopListenL2CapChannelRequest(psm: psm),
         ));
   }

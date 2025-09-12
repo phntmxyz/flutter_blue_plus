@@ -145,7 +145,7 @@ public class FlutterBluePlusPlugin implements
         data.put("remote_id", remoteDevice.getAddress());
         data.put("psm", psm);
         data.put("value", value);
-        invokeMethodUIThread("OnL2CapChannelReceive", data);
+        invokeMethodUIThread("OnL2CapChannelReceived", data);
     };
 
     private interface OperationOnPermission {
@@ -1612,7 +1612,7 @@ public class FlutterBluePlusPlugin implements
                     });
                     break;
                 }
-                case "stopListenL2capChannel":
+                case "stopL2capServer":
                 {
                     ArrayList<String> permissions = new ArrayList<>();
                     if (Build.VERSION.SDK_INT >= 31) { // Android 12 (October 2021)

@@ -888,7 +888,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
         {
             [self.l2CapChannelManager handleListenL2capChannel:call result:result];
         }
-        else if([@"stopListenL2capChannel" isEqualToString:call.method])
+        else if([@"stopL2capServer" isEqualToString:call.method])
         {
             [self.l2CapChannelManager handleStopListenL2capChannel:call result:result];
         }
@@ -2791,7 +2791,7 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
         if (bytesRead > 0) {
             [channelInfo.readBuffer appendBytes:buffer length:bytesRead];
             
-            [self.methodChannel invokeMethod:@"OnL2CapChannelReceive" arguments:@{
+            [self.methodChannel invokeMethod:@"OnL2CapChannelReceived" arguments:@{
                 @"remote_id": channelInfo.remoteId,
                 @"psm": channelInfo.psm,
                 @"value": [NSData dataWithBytes:buffer length:bytesRead]

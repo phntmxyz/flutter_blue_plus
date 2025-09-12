@@ -133,7 +133,7 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
     // Optionally stop server listener
     if (!keepServerListening && _isListeningL2Cap && _listeningPsm != null) {
       try {
-        await FlutterBluePlus.stopListenL2capChannel(_listeningPsm!);
+        await FlutterBluePlus.stopL2capServer(_listeningPsm!);
       } catch (_) {
         // ignore errors while stopping
       }
@@ -207,7 +207,7 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
     }
 
     try {
-      await FlutterBluePlus.stopListenL2capChannel(_listeningPsm!);
+      await FlutterBluePlus.stopL2capServer(_listeningPsm!);
 
       setState(() {
         _isListeningL2Cap = false;

@@ -293,7 +293,7 @@ abstract base class FlutterBluePlusPlatform {
     return Future.value(false);
   }
 
-  Future<void> stopListenL2CapChannel(
+  Future<void> stopL2capServer(
     StopListenL2CapChannelRequest request,
   ) {
     throw UnimplementedError();

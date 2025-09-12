@@ -322,10 +322,10 @@ final class FlutterBluePlusDarwin extends FlutterBluePlusPlatform {
   }
 
   @override
-  Future<void> stopListenL2CapChannel(
+  Future<void> stopL2capServer(
     StopListenL2CapChannelRequest request,
   ) async {
-    return await _invokeMethod('stopListenL2capChannel', request.toMap());
+    return await _invokeMethod('stopL2capServer', request.toMap());
   }
 
   @override
@@ -474,7 +474,7 @@ final class FlutterBluePlusDarwin extends FlutterBluePlusPlatform {
             call.arguments,
           ),
         );
-      case 'OnL2CapChannelReceive':
+      case 'OnL2CapChannelReceived':
         return _onL2CapChannelReceivedController.add(
           L2CapChannelData.fromMap(
             call.arguments,

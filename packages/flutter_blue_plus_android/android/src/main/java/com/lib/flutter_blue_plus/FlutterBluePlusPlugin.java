@@ -346,7 +346,7 @@ public class FlutterBluePlusPlugin implements
                 return;
             }
             if (l2CapChannelManager == null) {
-                l2CapChannelManager = new L2CapChannelManager(mBluetoothAdapter, deviceConnectedCallback, dataReceivedCallback);
+                l2CapChannelManager = new L2CapChannelManager(mBluetoothAdapter, deviceConnectedCallback, dataReceivedCallback, this);
             }
 
             switch (call.method) {
@@ -2988,7 +2988,7 @@ public class FlutterBluePlusPlugin implements
     // ██    ██    ██     ██  ██            ██
     //  ██████     ██     ██  ███████  ███████
 
-    private void log(LogLevel level, String message)
+    void log(LogLevel level, String message)
     {
         if(level.ordinal() > logLevel.ordinal()) {
             return;
@@ -3246,12 +3246,14 @@ class L2CapChannelManager {
     private final BluetoothAdapter adapter;
     private final DeviceConnected deviceConnectedCallback;
     private final DataReceived dataReceivedCallback;
+    private final FlutterBluePlusPlugin plugin;
     private final List<L2CapInfo> openL2CapChannelInfos = Collections.synchronizedList(new LinkedList<>());
 
-    public L2CapChannelManager(@NonNull final BluetoothAdapter adapter, @NonNull final DeviceConnected deviceConnectedCallback, @NonNull final DataReceived dataReceivedCallback) {
+    public L2CapChannelManager(@NonNull final BluetoothAdapter adapter, @NonNull final DeviceConnected deviceConnectedCallback, @NonNull final DataReceived dataReceivedCallback, @NonNull final FlutterBluePlusPlugin plugin) {
         this.adapter = adapter;
         this.deviceConnectedCallback = deviceConnectedCallback;
         this.dataReceivedCallback = dataReceivedCallback;
+        this.plugin = plugin;
     }
 
     @SuppressLint("MissingPermission")
@@ -3261,7 +3263,7 @@ class L2CapChannelManager {
             return;
         }
         if (!adapter.isEnabled()) {
-            log(LogLevel.DEBUG, "Bluetooth is disabled. Please enable first.");
+            plugin.log(FlutterBluePlusPlugin.LogLevel.DEBUG, "Bluetooth is disabled. Please enable first.");
             resultCallback.error("bluetooth_turned_off", "Bluetooth is turned off.", null);
             return;
         }
@@ -3273,7 +3275,7 @@ class L2CapChannelManager {
             } else {
                 serverSocket = adapter.listenUsingInsecureL2capChannel();
             }
-            final ServerSocketInfo socketInfo = new ServerSocketInfo(serverSocket, deviceConnectedCallback, dataReceivedCallback);
+            final ServerSocketInfo socketInfo = new ServerSocketInfo(serverSocket, deviceConnectedCallback, dataReceivedCallback, plugin);
             openL2CapChannelInfos.add(socketInfo);
             final int psm = serverSocket.getPsm();
             socketInfo.acceptConnections();
@@ -3283,7 +3285,7 @@ class L2CapChannelManager {
             resultCallback.success(responseData);
 
         } catch (IOException e) {
-            log(LogLevel.ERROR, e.getMessage());
+            plugin.log(FlutterBluePlusPlugin.LogLevel.ERROR, e.getMessage());
             resultCallback.error("open_l2cap_channel_failed", e.getMessage(), e);
         }
 
@@ -3298,8 +3300,8 @@ class L2CapChannelManager {
 
         L2CapInfo l2CapInfo = findInfo(psm);
         if (l2CapInfo == null) {
-            log(LogLevel.DEBUG, "L2CAP Channel with for device " + device.getAddress() + " / psm " + psm + " not open yet. Create channel.");
-            l2CapInfo = new ClientSocketInfo(new L2CapClientChannel(device, psm));
+            plugin.log(FlutterBluePlusPlugin.LogLevel.DEBUG, "L2CAP Channel with for device " + device.getAddress() + " / psm " + psm + " not open yet. Create channel.");
+            l2CapInfo = new ClientSocketInfo(new L2CapClientChannel(device, psm, plugin));
             openL2CapChannelInfos.add(l2CapInfo);
         }
         final L2CapClientChannel l2CapChannel = ((L2CapClientChannel) l2CapInfo.getL2CapChannel(device));
@@ -3348,14 +3350,14 @@ class L2CapChannelManager {
             try {
                 channelInfo.close(device);
             } catch (IOException e) {
-                log(LogLevel.ERROR, e.getMessage());
+                plugin.log(FlutterBluePlusPlugin.LogLevel.ERROR, e.getMessage());
                 resultCallback.error("close_l2cap_channel_failed", "Can't close channel with psm " + psm, null);
             }
             if (channelInfo.getType() == L2CapInfo.Type.CLIENT) {
                 openL2CapChannelInfos.remove(channelInfo);
             }
         } else {
-            log(LogLevel.DEBUG, "No channel found which is matching device " + device.getAddress() + " / psm " + psm);
+            plugin.log(FlutterBluePlusPlugin.LogLevel.DEBUG, "No channel found which is matching device " + device.getAddress() + " / psm " + psm);
         }
         resultCallback.success(null);
     }
@@ -3366,7 +3368,7 @@ class L2CapChannelManager {
             ((ServerSocketInfo) channelInfo).closeSocket();
             openL2CapChannelInfos.remove(channelInfo);
         } else {
-            log(LogLevel.DEBUG, "No server socket found with psm " + psm);
+            plugin.log(FlutterBluePlusPlugin.LogLevel.WARNING, "[FBP] No server socket found with psm " + psm);
         }
         resultCallback.success(null);
     }
@@ -3409,14 +3411,16 @@ abstract class L2CapChannel {
 
     protected static final int DEFAULT_READ_BUFFER_SIZE = 50;
     protected final byte[] readBuffer;
+    protected final FlutterBluePlusPlugin plugin;
     protected BluetoothSocket socket;
     protected OutputStream outputStream;
     protected InputStream inputStream;
     protected L2CapChannelManager.DataReceived dataReceivedCallback;
     private volatile boolean readerRunning = false;
 
-    public L2CapChannel(final int readBufferSize) {
+    public L2CapChannel(final int readBufferSize, final FlutterBluePlusPlugin plugin) {
         readBuffer = new byte[readBufferSize];
+        this.plugin = plugin;
     }
 
     public BluetoothSocket getSocket() {
@@ -3480,7 +3484,7 @@ abstract class L2CapChannel {
                 dataReceivedCallback.data(socket.getRemoteDevice(), psm, emit);
             }
         } catch (IOException e) {
-            log(LogLevel.ERROR, e.getMessage());
+            plugin.log(FlutterBluePlusPlugin.LogLevel.ERROR, e.getMessage());
             resultCallback.error("input_stream_read_failed", e.getMessage(), e);
         }
     }
@@ -3495,7 +3499,7 @@ abstract class L2CapChannel {
             outputStream.write(data);
             resultCallback.success(null);
         } catch (IOException e) {
-            log(LogLevel.ERROR, e.getMessage());
+            plugin.log(FlutterBluePlusPlugin.LogLevel.ERROR, e.getMessage());
             resultCallback.error("output_stream_write_failed", e.getMessage(), e);
         }
     }
@@ -3506,7 +3510,7 @@ abstract class L2CapChannel {
             try {
                 outputStream.close();
             } catch (IOException e) {
-                log(LogLevel.ERROR, e.getMessage());
+                plugin.log(FlutterBluePlusPlugin.LogLevel.ERROR, e.getMessage());
             } finally {
                 outputStream = null;
             }
@@ -3515,7 +3519,7 @@ abstract class L2CapChannel {
             try {
                 inputStream.close();
             } catch (IOException e) {
-                log(LogLevel.ERROR, e.getMessage());
+                plugin.log(FlutterBluePlusPlugin.LogLevel.ERROR, e.getMessage());
             } finally {
                 inputStream = null;
             }
@@ -3524,7 +3528,7 @@ abstract class L2CapChannel {
             try {
                 socket.close();
             } catch (IOException e) {
-                log(LogLevel.ERROR, e.getMessage());
+                plugin.log(FlutterBluePlusPlugin.LogLevel.ERROR, e.getMessage());
             } finally {
                 socket = null;
             }
@@ -3536,12 +3540,12 @@ class L2CapClientChannel extends L2CapChannel {
     private final BluetoothDevice device;
     private final int psm;
 
-    public L2CapClientChannel(final BluetoothDevice device, final int psm) {
-        this(device, psm, DEFAULT_READ_BUFFER_SIZE);
+    public L2CapClientChannel(final BluetoothDevice device, final int psm, final FlutterBluePlusPlugin plugin) {
+        this(device, psm, DEFAULT_READ_BUFFER_SIZE, plugin);
     }
 
-    public L2CapClientChannel(final BluetoothDevice device, final int psm, final int readBufferSize) {
-        super(readBufferSize);
+    public L2CapClientChannel(final BluetoothDevice device, final int psm, final int readBufferSize, final FlutterBluePlusPlugin plugin) {
+        super(readBufferSize, plugin);
         this.psm = psm;
         this.device = device;
     }
@@ -3558,11 +3562,9 @@ class L2CapClientChannel extends L2CapChannel {
             socket.connect();
             inputStream = socket.getInputStream();
             outputStream = socket.getOutputStream();
-            // set callback
-            setDataReceivedCallback(((L2CapChannelManager) null)); // placeholder
             resultCallback.success(null);
         } catch (IOException e) {
-            log(LogLevel.ERROR, e.getMessage());
+            plugin.log(FlutterBluePlusPlugin.LogLevel.ERROR, e.getMessage());
             resultCallback.error("open_l2cap_channel_failed", e.getMessage(), e);
         }
     }
@@ -3579,18 +3581,18 @@ class L2CapClientChannel extends L2CapChannel {
 class L2CapServerChannel extends L2CapChannel {
 
 
-    public L2CapServerChannel(final BluetoothSocket socket) {
-        this(socket, DEFAULT_READ_BUFFER_SIZE);
+    public L2CapServerChannel(final BluetoothSocket socket, final FlutterBluePlusPlugin plugin) {
+        this(socket, DEFAULT_READ_BUFFER_SIZE, plugin);
     }
 
-    public L2CapServerChannel(final BluetoothSocket socket, final int readBufferSize) {
-        super(readBufferSize);
+    public L2CapServerChannel(final BluetoothSocket socket, final int readBufferSize, final FlutterBluePlusPlugin plugin) {
+        super(readBufferSize, plugin);
         this.socket = socket;
     }
 
     @TargetApi(Build.VERSION_CODES.Q)
     public synchronized void openStreams() throws IOException {
-        log(LogLevel.DEBUG, "Opening streams");
+        plugin.log(FlutterBluePlusPlugin.LogLevel.DEBUG, "Opening streams");
         inputStream = socket.getInputStream();
         outputStream = socket.getOutputStream();
     }
@@ -3652,12 +3654,14 @@ class ServerSocketInfo implements L2CapInfo {
     private final List<L2CapServerChannel> openChannels;
     private final L2CapChannelManager.DeviceConnected deviceConnectedCallback;
     private final L2CapChannelManager.DataReceived dataReceivedCallback;
+    private final FlutterBluePlusPlugin plugin;
     private boolean isAcceptingConnections;
 
-    public ServerSocketInfo(BluetoothServerSocket serverSocket, final L2CapChannelManager.DeviceConnected deviceConnectedCallback, final L2CapChannelManager.DataReceived dataReceivedCallback) {
+    public ServerSocketInfo(BluetoothServerSocket serverSocket, final L2CapChannelManager.DeviceConnected deviceConnectedCallback, final L2CapChannelManager.DataReceived dataReceivedCallback, final FlutterBluePlusPlugin plugin) {
         this.serverSocket = serverSocket;
         this.deviceConnectedCallback = deviceConnectedCallback;
         this.dataReceivedCallback = dataReceivedCallback;
+        this.plugin = plugin;
         openChannels = Collections.synchronizedList(new LinkedList<>());
         isAcceptingConnections = false;
     }
@@ -3706,7 +3710,7 @@ class ServerSocketInfo implements L2CapInfo {
                         Log.d(TAG, "Stopping server socket. Close thread.");
                         break;
                     }
-                    final L2CapServerChannel l2capChannel = new L2CapServerChannel(socket);
+                    final L2CapServerChannel l2capChannel = new L2CapServerChannel(socket, plugin);
                     l2capChannel.openStreams();
                     l2capChannel.setDataReceivedCallback(dataReceivedCallback);
                     l2capChannel.startReaderLoop(getPsm());
@@ -3757,6 +3761,56 @@ class DeviceConnectedToL2CapChannel {
 
 
 class MarshallingUtil {
+
+    static String bytesToHex(byte[] bytes) {
+        if (bytes == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+            sb.append(Character.forDigit(b & 0xF, 16));
+        }
+        return sb.toString();
+    }
+
+    // returns 128-bit representation
+    static String uuid128(Object uuid) {
+        if (!(uuid instanceof UUID) && !(uuid instanceof String)) {
+            throw new IllegalArgumentException("input must be UUID or String");
+        }
+
+        String s = uuid.toString();
+
+        if (s.length() == 4) {
+            // 16-bit uuid
+            return String.format("0000%s-0000-1000-8000-00805f9b34fb", s).toLowerCase();
+        } else if (s.length() == 8) {
+            // 32-bit uuid
+            return String.format("%s-0000-1000-8000-00805f9b34fb", s).toLowerCase();
+        } else {
+            // 128-bit uuid
+            return s.toLowerCase();
+        }
+    }
+
+    // returns shortest representation
+    static String uuidStr(Object uuid) {
+        String s = uuid128(uuid);
+        boolean starts = s.startsWith("0000");
+        boolean ends = s.endsWith("-0000-1000-8000-00805f9b34fb");
+        if (starts && ends) {
+            // 16-bit
+            return s.substring(4, 8);
+        } else if (ends) {
+            // 32-bit
+            return s.substring(0, 8);
+        } else {
+            // 128-bit
+            return s;
+        }
+    }
+
     @SuppressLint("MissingPermission")
     static HashMap<String, Object> bmScanAdvertisement(BluetoothDevice device, ScanResult result) {
 
@@ -3797,7 +3851,7 @@ class MarshallingUtil {
             for (Map.Entry<ParcelUuid, byte[]> entry : serviceData.entrySet()) {
                 ParcelUuid key = entry.getKey();
                 byte[] value = entry.getValue();
-                serviceDataB.put(uuidStr(key.getUuid()), bytesToHex(value));
+        serviceDataB.put(uuidStr(key.getUuid()), bytesToHex(value));
             }
         }
 
@@ -3980,44 +4034,6 @@ class MarshallingUtil {
                 return BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER;
             default:
                 return BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER;
-        }
-    }
-
-
-
-    static String uuid128(Object uuid) {
-        if (!(uuid instanceof UUID) && !(uuid instanceof String)) {
-            throw new IllegalArgumentException("input must be UUID or String");
-        }
-
-        String s = uuid.toString();
-
-        if (s.length() == 4) {
-            // 16-bit uuid
-            return String.format("0000%s-0000-1000-8000-00805f9b34fb", s).toLowerCase();
-        } else if (s.length() == 8) {
-            // 32-bit uuid
-            return String.format("%s-0000-1000-8000-00805f9b34fb", s).toLowerCase();
-        } else {
-            // 128-bit uuid
-            return s.toLowerCase();
-        }
-    }
-
-    // returns shortest representation
-    static String uuidStr(Object uuid) {
-        String s = uuid128(uuid);
-        boolean starts = s.startsWith("0000");
-        boolean ends = s.endsWith("-0000-1000-8000-00805f9b34fb");
-        if (starts && ends) {
-            // 16-bit
-            return s.substring(4, 8);
-        } else if (ends) {
-            // 32-bit
-            return s.substring(0, 8);
-        } else {
-            // 128-bit
-            return s;
         }
     }
 

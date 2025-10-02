@@ -114,6 +114,27 @@ class BluetoothL2capChannel {
     ));
   }
 
+  /// Stream of incoming L2CAP channel data.
+  ///
+  /// This stream emits [L2CapChannelData] events whenever data is received
+  /// on this L2CAP channel. Each event contains the [remoteId], [psm],
+  /// and the received [value] bytes.
+  ///
+  /// The stream is filtered to only include data for this specific
+  /// device and PSM.
+  ///
+  /// Example:
+  /// ```dart
+  /// channel.onL2CapChannelReceived.listen((data) {
+  ///   print('Received ${data.length} bytes');
+  /// });
+  /// ```
+  Stream<List<int>> get onL2CapChannelReceived {
+    return FlutterBluePlusPlatform.instance.onL2CapChannelReceived
+      .where((d) => d.remoteId == deviceId && d.psm == psm)
+      .map((d) => d.value);
+  }
+
   @override
   String toString() {
     return 'BluetoothL2capChannel{'

@@ -3554,6 +3554,14 @@ class L2CapClientChannel extends L2CapChannel {
     @TargetApi(Build.VERSION_CODES.Q)
     public synchronized void connectToL2CapChannel(final boolean secure, final Result resultCallback) {
         try {
+            // Close existing socket if present before creating a new one
+            if (socket != null) {
+                try {
+                    socket.close();
+                } catch (IOException ignored) {}
+                socket = null;
+            }
+
             if (secure) {
                 socket = device.createL2capChannel(psm);
             } else {

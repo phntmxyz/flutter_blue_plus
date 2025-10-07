@@ -29,7 +29,7 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
   final TextEditingController _l2capDataController = TextEditingController();
   final List<String> _l2capReceivedList = [];
   StreamSubscription<L2CapChannelData>? _l2capSubscription;
-  bool _l2capSecure = true;
+  bool _l2capSecure = false;
   bool _isServerMode = true;
   bool _hasValidPsm = false;
 
@@ -51,6 +51,17 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
   late TabController _tabController;
 
   bool get isConnected => _connectionState == BluetoothConnectionState.connected;
+
+  void _log(String message) {
+    final ts = DateTime.now().toIso8601String();
+    _logMessages.insert(0, '[$ts] $message');
+    if (_logMessages.length > 500) {
+      _logMessages.removeRange(500, _logMessages.length);
+    }
+    if (mounted && _tabController.index == 1) {
+      setState(() {});
+    }
+  }
 
   @override
   void initState() {
@@ -92,6 +103,7 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
       if (!isServerEvent && !isClientEvent) return;
 
       final receivedData = String.fromCharCodes(evt.value);
+      _log('L2CAP RX psm=${evt.psm} remote=${evt.remoteId.str} bytes=${evt.value.length} data="$receivedData"');
       _l2capReceivedList.insert(0, receivedData);
       if (_l2capReceivedList.length > 200) {
         _l2capReceivedList.removeRange(200, _l2capReceivedList.length);
@@ -191,12 +203,14 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
       Snackbar.show(ABC.c, "L2CAP Server started on PSM: $_listeningPsm", success: true);
       // ignore: avoid_print
       print("L2CAP Server started - PSM: $_listeningPsm, Secure: $_l2capSecure");
+      _log('Server listening started psm=$psm secure=$_l2capSecure');
     } catch (e, backtrace) {
       Snackbar.show(ABC.c, prettyException("Start L2CAP Server Error:", e), success: false);
       // ignore: avoid_print
       print(e);
       // ignore: avoid_print
       print("backtrace: $backtrace");
+      _log('Server listening start error psm=${_listeningPsm ?? -1} err=$e');
     }
   }
 
@@ -217,12 +231,14 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
       });
 
       Snackbar.show(ABC.c, "L2CAP Server stopped", success: true);
+      _log('Server listening stopped');
     } catch (e, backtrace) {
       Snackbar.show(ABC.c, prettyException("Stop L2CAP Server Error:", e), success: false);
       // ignore: avoid_print
       print(e);
       // ignore: avoid_print
       print("backtrace: $backtrace");
+      _log('Server listening stop error psm=$_listeningPsm err=$e');
     }
   }
 
@@ -240,6 +256,7 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
       if (!isConnected) {
         await widget.device.connectAndUpdateStream();
       }
+      _log('Opening client channel psm=$psm secure=$_l2capSecure');
       var channel = await widget.device.openL2CapChannel(psm, secure: _l2capSecure);
 
       setState(() {
@@ -249,6 +266,7 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
       Snackbar.show(ABC.c, "L2CAP channel opened - PSM: $psm", success: true);
       // ignore: avoid_print
       print("L2CAP Channel opened - Device: ${widget.device.remoteId}, PSM: $psm, Secure: $_l2capSecure");
+      _log('Client channel opened psm=$psm');
     } catch (e) {
       // Retry once after reconnect if secure handshake caused a transient drop
       try {
@@ -262,12 +280,14 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
         Snackbar.show(ABC.c, "L2CAP channel opened after retry - PSM: $psm", success: true);
         // ignore: avoid_print
         print("L2CAP Channel opened after retry - Device: ${widget.device.remoteId}, PSM: $psm, Secure: $_l2capSecure");
+        _log('Client channel opened after retry psm=$psm');
       } catch (e2, bt2) {
         Snackbar.show(ABC.c, prettyException("Open L2CAP Channel Error:", e2), success: false);
         // ignore: avoid_print
         print(e2);
         // ignore: avoid_print
         print("backtrace: $bt2");
+        _log('Client channel open retry error psm=$psm err=$e2');
       }
     }
   }
@@ -283,6 +303,7 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
     try {
       var channel = _activeL2CapChannels[psm];
       if (channel != null) {
+        _log('Closing client channel psm=$psm');
         await channel.close();
       }
 
@@ -291,12 +312,14 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
       });
 
       Snackbar.show(ABC.c, "L2CAP channel closed - PSM: $psm", success: true);
+      _log('Client channel closed psm=$psm');
     } catch (e, backtrace) {
       Snackbar.show(ABC.c, prettyException("Close L2CAP Channel Error:", e), success: false);
       // ignore: avoid_print
       print(e);
       // ignore: avoid_print
       print("backtrace: $backtrace");
+      _log('Client channel close error psm=$psm err=$e');
     }
   }
 
@@ -317,20 +340,25 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
     try {
       List<int> bytes = data.codeUnits;
       var channel = _activeL2CapChannels[psm];
-      if (channel != null) {
-        await channel.write(bytes);
+      if (channel == null) {
+        throw Exception("Channel not found for PSM $psm");
       }
+
+      _log('Write attempt psm=$psm len=${bytes.length}');
+      await channel.write(bytes);
 
       Snackbar.show(ABC.c, "L2CAP data sent - ${bytes.length} bytes", success: true);
       // ignore: avoid_print
       print("L2CAP Data sent - PSM: $psm, Data: $data, Bytes: ${bytes.length}");
       _l2capDataController.clear();
+      _log('Write success psm=$psm len=${bytes.length}');
     } catch (e, backtrace) {
       Snackbar.show(ABC.c, prettyException("Write L2CAP Channel Error:", e), success: false);
       // ignore: avoid_print
       print(e);
       // ignore: avoid_print
       print("backtrace: $backtrace");
+      _log('Write error psm=$psm err=$e');
     }
   }
 
@@ -476,32 +504,36 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
               children: [
                 // Data tab
                 Builder(builder: (context) {
-                  final bool canTransfer = _isServerMode ? _isListeningL2Cap : _activeL2CapChannels.isNotEmpty;
-                  if (!canTransfer) {
-                    return Center(
-                      child: Text(
-                        _isServerMode ? 'Please start the server first' : 'Please open a channel first',
-                        style: const TextStyle(color: Colors.grey),
-                      ),
-                    );
-                  }
+                  final bool canSend = _isServerMode ? _isListeningL2Cap : _activeL2CapChannels.isNotEmpty;
                   return L2CapListSection(
                     entries: _l2capReceivedList,
                     title: 'Data Transfer',
                     actions: [
+                      if (!canSend)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8.0),
+                          child: Text(
+                            _isServerMode ? 'Start the server to enable sending' : 'Open a channel to enable sending',
+                            style: const TextStyle(color: Colors.grey),
+                          ),
+                        ),
                       TextField(
-                        onEditingComplete: onWriteL2CapPressed,
+                        onEditingComplete: canSend ? onWriteL2CapPressed : null,
                         controller: _l2capDataController,
                         decoration: InputDecoration(
                           labelText: 'Data to send',
-                          border: OutlineInputBorder(),
+                          border: const OutlineInputBorder(),
                           hintText: 'Enter data to send over L2CAP...',
                           suffixIcon: Padding(
                             padding: const EdgeInsets.only(right: 8.0),
-                            child: IconButton(onPressed: onWriteL2CapPressed, icon: const Icon(Icons.send, size: 16)),
+                            child: IconButton(
+                              onPressed: canSend ? onWriteL2CapPressed : null,
+                              icon: const Icon(Icons.send, size: 16),
+                            ),
                           ),
                         ),
                         maxLines: 1,
+                        enabled: true,
                       ),
                     ],
                     topRightWidget: ElevatedButton.icon(
@@ -662,37 +694,39 @@ class L2CapListSection extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            if (actions.isNotEmpty) Expanded(child: Column(children: actions)),
-            Container(
-              height: 200,
-              padding: const EdgeInsets.all(8.0),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey[300]!),
-                borderRadius: BorderRadius.circular(8.0),
-                color: Colors.grey[50],
-              ),
-              child: entries.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'No entries yet...',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                    )
-                  : ListView.builder(
-                      itemCount: entries.length,
-                      itemBuilder: (context, index) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2.0),
-                          child: Text(
-                            entries[index],
-                            style: const TextStyle(
-                              fontFamily: 'monospace',
-                              fontSize: 12,
+            if (actions.isNotEmpty) ...actions,
+            const SizedBox(height: 8),
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(8.0),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey[300]!),
+                  borderRadius: BorderRadius.circular(8.0),
+                  color: Colors.grey[50],
+                ),
+                child: entries.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No entries yet...',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      )
+                    : ListView.builder(
+                        itemCount: entries.length,
+                        itemBuilder: (context, index) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2.0),
+                            child: Text(
+                              entries[index],
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                              ),
                             ),
-                          ),
-                        );
-                      },
-                    ),
+                          );
+                        },
+                      ),
+              ),
             ),
           ],
         ),

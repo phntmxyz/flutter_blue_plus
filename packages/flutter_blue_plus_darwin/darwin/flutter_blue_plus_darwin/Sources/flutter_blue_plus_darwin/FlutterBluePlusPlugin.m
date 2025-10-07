@@ -2363,8 +2363,8 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
 {
     if (error) {
         Log(LERROR, @"didOpenL2CAPChannel error: %@ (%@, code=%ld)", error.localizedDescription, error.domain, (long)error.code);
-        // complete any pending open result with error
-        [self.l2CapChannelManager completePendingOpenForRemoteId:[[peripheral identifier] UUIDString]
+        NSString *remoteId = [[peripheral identifier] UUIDString];
+        [self.l2CapChannelManager completePendingOpenForRemoteId:remoteId
                                                              psm:channel.PSM
                                                            error:error];
         return;
@@ -2454,7 +2454,8 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
         // Security is controlled by the peripheral when publishing the channel with
         // publishL2CAPChannelWithEncryption. The secure parameter is acknowledged but 
         // cannot be enforced on the client side - it depends on the server's configuration.
-        NSLog(@"Opening L2CAP channel with requested security: %@ (Note: iOS client security controlled by server)", secure ? @"secure" : @"insecure");
+        BOOL secureBool = [secure boolValue];
+        NSLog(@"Opening L2CAP channel with requested security: %@ (Note: iOS client security controlled by server)", secureBool ? @"secure" : @"insecure");
         
         if (peripheral == nil) {
             result([FlutterError errorWithCode:@"openL2CapChannel" 
@@ -2464,11 +2465,12 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
         }
         
         if (peripheral.state != CBPeripheralStateConnected) {
-            result([FlutterError errorWithCode:@"openL2CapChannel" 
-                                      message:@"Peripheral not connected" 
+            result([FlutterError errorWithCode:@"openL2CapChannel"
+                                      message:@"Peripheral not connected"
                                       details:nil]);
             return;
         }
+
         // Defer the result until didOpenL2CAPChannel returns (success or error)
         NSString *key = [NSString stringWithFormat:@"%@: %@", remoteId, psmValue];
         self.pendingOpenResults[key] = [result copy];
@@ -2521,16 +2523,40 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
     NSDictionary *args = call.arguments;
     NSString *remoteId = args[@"remote_id"];
     NSNumber *psmValue = args[@"psm"];
-    
+
     L2CapChannelInfo *channelInfo = [self findChannelByRemoteId:remoteId psm:psmValue];
-    if (channelInfo && channelInfo.channel) {
-        channelInfo.channel.inputStream.delegate = nil;
-        channelInfo.channel.outputStream.delegate = nil;
-        [channelInfo.channel.inputStream close];
-        [channelInfo.channel.outputStream close];
-        [self.channels removeObject:channelInfo];
+    // Fallback for server-accepted channels which are tracked under remoteId "server"
+    if (!channelInfo) {
+        channelInfo = [self findChannelByRemoteId:@"server" psm:psmValue];
     }
-    
+    if (channelInfo && channelInfo.channel) {
+        void (^closeChannelNow)(void) = ^{
+            NSInputStream *is = channelInfo.channel.inputStream;
+            NSOutputStream *os = channelInfo.channel.outputStream;
+
+            // Remove delegates and streams from run loop
+            is.delegate = nil;
+            os.delegate = nil;
+            [is removeFromRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+            [os removeFromRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+
+            // Close both streams
+            [os close];
+            [is close];
+
+            // Null out the channel reference immediately so CoreBluetooth knows it's closed
+            channelInfo.channel = nil;
+
+            // Remove from tracking immediately
+            [self.channels removeObject:channelInfo];
+        };
+        if ([NSThread isMainThread]) {
+            closeChannelNow();
+        } else {
+            dispatch_async(dispatch_get_main_queue(), closeChannelNow);
+        }
+    }
+
     result(nil);
 }
 
@@ -2575,15 +2601,15 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
         if (outputStream.hasSpaceAvailable) {
             NSInteger bytesWritten = [outputStream write:valueData.data.bytes maxLength:valueData.data.length];
             if (bytesWritten < 0) {
-                result([FlutterError errorWithCode:@"writeL2CapChannel" 
-                                          message:@"Write failed" 
+                result([FlutterError errorWithCode:@"writeL2CapChannel"
+                                          message:@"Write failed"
                                           details:nil]);
             } else {
                 result(nil);
             }
         } else {
-            result([FlutterError errorWithCode:@"writeL2CapChannel" 
-                                      message:@"Output stream not ready" 
+            result([FlutterError errorWithCode:@"writeL2CapChannel"
+                                      message:@"Output stream not ready"
                                       details:nil]);
         }
     } else {
@@ -2813,8 +2839,25 @@ typedef NS_ENUM(NSUInteger, LogLevel) {
         @"remote_id": channelInfo.remoteId,
         @"psm": channelInfo.psm
     }];
-    
-    [self.channels removeObject:channelInfo];
+
+    // Ensure we fully tear down the streams on main thread
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (channelInfo.channel) {
+            NSInputStream *is = channelInfo.channel.inputStream;
+            NSOutputStream *os = channelInfo.channel.outputStream;
+
+            is.delegate = nil;
+            os.delegate = nil;
+            [is removeFromRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+            [os removeFromRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+            [is close];
+            [os close];
+
+            // Null out the channel reference so CoreBluetooth knows it's closed
+            channelInfo.channel = nil;
+        }
+        [self.channels removeObject:channelInfo];
+    });
 }
 
 - (L2CapChannelInfo *)findChannelForStream:(NSStream *)stream

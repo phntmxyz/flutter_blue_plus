@@ -2,6 +2,26 @@
 // All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// ==============================================================================
+// KNOWN ISSUE: CoreBluetooth L2CAP Channel Cascade Close Bug
+// ==============================================================================
+//
+// PROBLEM:
+// CoreBluetooth has a bug where closing one L2CAP channel causes ALL other
+// L2CAP channels to also close. This happens because closing streams for one
+// channel triggers spurious NSStreamEventEndEncountered events on other
+// unrelated channels' streams.
+// CURRENT BEHAVIOR:
+// - Multiple L2CAP channels can be open simultaneously
+// - Closing one channel will cause other channels to close as well
+// - Re-opening a channel works, but will close other open channels
+// - Data sending and receiving works correctly while channels are open
+//
+// TODO: Revisit this implementation once Apple fixes the CoreBluetooth L2CAP bug.
+// see https://developer.apple.com/forums/thread/798454
+//
+// ==============================================================================
+
 #import "./include/flutter_blue_plus_darwin/FlutterBluePlusPlugin.h"
 #include <Foundation/NSObjCRuntime.h>
 

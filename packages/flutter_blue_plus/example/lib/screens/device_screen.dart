@@ -1,12 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-// import 'package:flutter/cupertino.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import '../widgets/service_tile.dart';
-import '../widgets/characteristic_tile.dart';
-import '../widgets/descriptor_tile.dart';
 import '../utils/snackbar.dart';
 import '../utils/extra.dart';
 import '../widgets/l2cap_section.dart';
@@ -154,26 +151,6 @@ class _DeviceScreenState extends State<DeviceScreen> {
     }
   }
 
-  // L2CAP moved to L2CapSection widget
-
-  List<Widget> _buildServiceTiles(BuildContext context, BluetoothDevice d) {
-    return _services
-        .map(
-          (s) => ServiceTile(
-            service: s,
-            characteristicTiles: s.characteristics.map((c) => _buildCharacteristicTile(c)).toList(),
-          ),
-        )
-        .toList();
-  }
-
-  CharacteristicTile _buildCharacteristicTile(BluetoothCharacteristic c) {
-    return CharacteristicTile(
-      characteristic: c,
-      descriptorTiles: c.descriptors.map((d) => DescriptorTile(descriptor: d)).toList(),
-    );
-  }
-
   Widget buildSpinner(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.all(14.0),
@@ -190,7 +167,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
   Widget buildRemoteId(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.all(8.0),
-      child: Text('${widget.device.remoteId}'),
+      child: Text('Remote id: ${widget.device.remoteId}'),
     );
   }
 
@@ -200,28 +177,6 @@ class _DeviceScreenState extends State<DeviceScreen> {
       children: [
         isConnected ? const Icon(Icons.bluetooth_connected) : const Icon(Icons.bluetooth_disabled),
         Text(((isConnected && _rssi != null) ? '${_rssi!} dBm' : ''), style: Theme.of(context).textTheme.bodySmall)
-      ],
-    );
-  }
-
-  Widget buildGetServices(BuildContext context) {
-    return IndexedStack(
-      index: (_isDiscoveringServices) ? 1 : 0,
-      children: <Widget>[
-        TextButton(
-          onPressed: onDiscoverServicesPressed,
-          child: const Text("Get Services"),
-        ),
-        const IconButton(
-          icon: SizedBox(
-            width: 18.0,
-            height: 18.0,
-            child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation(Colors.grey),
-            ),
-          ),
-          onPressed: null,
-        )
       ],
     );
   }
@@ -267,18 +222,22 @@ class _DeviceScreenState extends State<DeviceScreen> {
         ),
         body: SingleChildScrollView(
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               buildRemoteId(context),
               ListTile(
                 leading: buildRssiTile(context),
                 title: Text('Device is ${_connectionState.toString().split('.')[1]}.'),
-                trailing: buildGetServices(context),
               ),
               buildMtuTile(context),
               const Divider(),
-              ..._buildServiceTiles(context, widget.device),
+              ServicesSection(
+                services: _services,
+                isDiscoveringServices: _isDiscoveringServices,
+                onDiscoverServicesPressed: onDiscoverServicesPressed,
+              ),
               const Divider(),
-              buildL2CapSection(context),
+              L2CapSection(device: widget.device),
               const Divider(),
             ],
           ),

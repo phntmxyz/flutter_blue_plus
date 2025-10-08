@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -23,15 +24,15 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
 
   // L2CAP related state
   final Map<int, BluetoothL2capChannel> _activeL2CapChannels = {};
-  bool _isListeningL2Cap = false;
-  int? _listeningPsm;
+  final List<int> _serverPsms = []; // Track all active server PSMs
   final TextEditingController _psmController = TextEditingController();
   final TextEditingController _l2capDataController = TextEditingController();
-  final List<String> _l2capReceivedList = [];
+  final Map<int, List<String>> _l2capReceivedByPsm = {}; // Per-channel received data
   StreamSubscription<L2CapChannelData>? _l2capSubscription;
   bool _l2capSecure = false;
   bool _isServerMode = true;
   bool _hasValidPsm = false;
+  int? _selectedPsm; // Currently selected PSM for viewing/sending data
 
   void _onPsmControllerChanged() {
     {
@@ -53,8 +54,9 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
   bool get isConnected => _connectionState == BluetoothConnectionState.connected;
 
   void _log(String message) {
+    final prefix = 'Mode: ${_isServerMode ? "Server" : "Client"}, message: ';
     final ts = DateTime.now().toIso8601String();
-    _logMessages.insert(0, '[$ts] $message');
+    _logMessages.insert(0, '[$ts] $prefix $message');
     if (_logMessages.length > 500) {
       _logMessages.removeRange(500, _logMessages.length);
     }
@@ -104,10 +106,16 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
 
       final receivedData = String.fromCharCodes(evt.value);
       _log('L2CAP RX psm=${evt.psm} remote=${evt.remoteId.str} bytes=${evt.value.length} data="$receivedData"');
-      _l2capReceivedList.insert(0, receivedData);
-      if (_l2capReceivedList.length > 200) {
-        _l2capReceivedList.removeRange(200, _l2capReceivedList.length);
+
+      // Store data per PSM
+      if (!_l2capReceivedByPsm.containsKey(evt.psm)) {
+        _l2capReceivedByPsm[evt.psm] = [];
       }
+      _l2capReceivedByPsm[evt.psm]!.insert(0, receivedData);
+      if (_l2capReceivedByPsm[evt.psm]!.length > 200) {
+        _l2capReceivedByPsm[evt.psm]!.removeRange(200, _l2capReceivedByPsm[evt.psm]!.length);
+      }
+
       if (mounted && _tabController.index == 0) {
         setState(() {});
       }
@@ -128,7 +136,7 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
 
   // L2CAP Methods
   Future<void> resetL2cap({bool keepServerListening = true, bool clearLogs = false}) async {
-    // Close all client-side channels (keep server placeholder if requested)
+    // Close all client-side channels
     final channelsToClose = _activeL2CapChannels.entries
         .where((e) => e.value.deviceId.str != 'server')
         .map((e) => e.value)
@@ -142,67 +150,67 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
       }
     }
 
-    // Optionally stop server listener
-    if (!keepServerListening && _isListeningL2Cap && _listeningPsm != null) {
-      try {
-        await FlutterBluePlus.stopL2capServer(_listeningPsm!);
-      } catch (_) {
-        // ignore errors while stopping
+    // Optionally stop all server listeners
+    if (!keepServerListening) {
+      for (final psm in _serverPsms.toList()) {
+        try {
+          await FlutterBluePlus.stopL2capServer(psm);
+        } catch (_) {
+          // ignore errors while stopping
+        }
       }
     }
 
     if (!mounted) return;
     setState(() {
       _l2capDataController.clear();
-      _l2capReceivedList.clear();
+      _l2capReceivedByPsm.clear();
       if (clearLogs) _logMessages.clear();
 
-      final bool keepServer = keepServerListening && _isListeningL2Cap && _listeningPsm != null;
+      final bool keepServer = keepServerListening && _serverPsms.isNotEmpty;
 
       // Reset channel map
       _activeL2CapChannels.removeWhere((psm, ch) => ch.deviceId.str != 'server');
       if (keepServer) {
-        // Ensure server placeholder exists
-        _activeL2CapChannels[_listeningPsm!] = BluetoothL2capChannel(
-          deviceId: DeviceIdentifier('server'),
-          psm: _listeningPsm!,
-        );
+        // Ensure server placeholders exist for all active servers
+        for (final psm in _serverPsms) {
+          _activeL2CapChannels[psm] = BluetoothL2capChannel(
+            deviceId: DeviceIdentifier('server'),
+            psm: psm,
+          );
+        }
       } else {
         _activeL2CapChannels.clear();
-        _isListeningL2Cap = false;
-        _listeningPsm = null;
+        _serverPsms.clear();
       }
 
-      // Reset PSM input (no placeholder for demo)
-      _psmController.text = keepServer && _listeningPsm != null ? _listeningPsm!.toString() : '';
+      // Reset selections
+      _psmController.clear();
+      _selectedPsm = null;
     });
   }
 
   Future onStartL2CapServerPressed() async {
-    if (_isListeningL2Cap) {
-      Snackbar.show(ABC.c, "L2CAP Server already running", success: false);
-      return;
-    }
-
+    _log('>>> USER TAPPED: Start L2CAP Server');
     try {
       var psm = await FlutterBluePlus.listenL2capChannel(secure: _l2capSecure);
 
       setState(() {
-        _isListeningL2Cap = true;
-        _listeningPsm = psm;
-        // Update the PSM text field with the actual assigned PSM
-        _psmController.text = psm.toString();
+        _serverPsms.add(psm);
         // Create a server-side channel placeholder so Read/Write work on the server
         // We use a special remoteId 'server' that the native layer recognizes
         _activeL2CapChannels[psm] = BluetoothL2capChannel(
           deviceId: DeviceIdentifier('server'),
           psm: psm,
         );
+        // Auto-select the new PSM
+        _selectedPsm = psm;
+        _l2capReceivedByPsm[psm] = [];
       });
 
-      Snackbar.show(ABC.c, "L2CAP Server started on PSM: $_listeningPsm", success: true);
+      Snackbar.show(ABC.c, "L2CAP Server started on PSM: $psm", success: true);
       // ignore: avoid_print
-      print("L2CAP Server started - PSM: $_listeningPsm, Secure: $_l2capSecure");
+      print("L2CAP Server started - PSM: $psm, Secure: $_l2capSecure");
       _log('Server listening started psm=$psm secure=$_l2capSecure');
     } catch (e, backtrace) {
       Snackbar.show(ABC.c, prettyException("Start L2CAP Server Error:", e), success: false);
@@ -210,41 +218,44 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
       print(e);
       // ignore: avoid_print
       print("backtrace: $backtrace");
-      _log('Server listening start error psm=${_listeningPsm ?? -1} err=$e');
+      _log('Server listening start error err=$e');
     }
   }
 
-  Future onStopL2CapServerPressed() async {
-    if (!_isListeningL2Cap) {
-      Snackbar.show(ABC.c, "No L2CAP Server running", success: false);
-      return;
-    }
-
+  Future onStopL2CapServerPressed(int psm) async {
+    _log('>>> USER TAPPED: Stop L2CAP Server psm=$psm');
     try {
-      await FlutterBluePlus.stopL2capServer(_listeningPsm!);
+      await FlutterBluePlus.stopL2capServer(psm);
 
       setState(() {
-        _isListeningL2Cap = false;
-        // remove server-side channel placeholder if present
-        _activeL2CapChannels.remove(_listeningPsm);
-        _listeningPsm = null;
+        _serverPsms.remove(psm);
+        _activeL2CapChannels.remove(psm);
+        _l2capReceivedByPsm.remove(psm);
+        // If we stopped the selected PSM, select another or null
+        if (_selectedPsm == psm) {
+          _selectedPsm = _serverPsms.isNotEmpty
+              ? _serverPsms.first
+              : (_activeL2CapChannels.keys.isNotEmpty ? _activeL2CapChannels.keys.first : null);
+        }
       });
 
-      Snackbar.show(ABC.c, "L2CAP Server stopped", success: true);
-      _log('Server listening stopped');
+      Snackbar.show(ABC.c, "L2CAP Server stopped - PSM: $psm", success: true);
+      _log('Server listening stopped psm=$psm');
     } catch (e, backtrace) {
       Snackbar.show(ABC.c, prettyException("Stop L2CAP Server Error:", e), success: false);
       // ignore: avoid_print
       print(e);
       // ignore: avoid_print
       print("backtrace: $backtrace");
-      _log('Server listening stop error psm=$_listeningPsm err=$e');
+      _log('Server listening stop error psm=$psm err=$e');
     }
   }
 
   Future onConnectL2CapPressed() async {
     if (!_hasValidPsm) return;
     final int psm = int.parse(_psmController.text);
+
+    _log('>>> USER TAPPED: Open L2CAP Channel psm=$psm');
 
     if (_activeL2CapChannels.containsKey(psm)) {
       Snackbar.show(ABC.c, "L2CAP channel already open for PSM: $psm", success: false);
@@ -261,6 +272,8 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
 
       setState(() {
         _activeL2CapChannels[psm] = channel;
+        _selectedPsm = psm;
+        _l2capReceivedByPsm[psm] = [];
       });
 
       Snackbar.show(ABC.c, "L2CAP channel opened - PSM: $psm", success: true);
@@ -276,6 +289,8 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
         var channel = await widget.device.openL2CapChannel(psm, secure: _l2capSecure);
         setState(() {
           _activeL2CapChannels[psm] = channel;
+          _selectedPsm = psm;
+          _l2capReceivedByPsm[psm] = [];
         });
         Snackbar.show(ABC.c, "L2CAP channel opened after retry - PSM: $psm", success: true);
         // ignore: avoid_print
@@ -293,12 +308,14 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
   }
 
   Future onDisconnectL2CapPressed() async {
-    int psm = int.tryParse(_psmController.text) ?? 1001;
-
-    if (!_activeL2CapChannels.containsKey(psm)) {
-      Snackbar.show(ABC.c, "No L2CAP channel open for PSM: $psm", success: false);
+    if (_selectedPsm == null) {
+      Snackbar.show(ABC.c, "No channel selected", success: false);
       return;
     }
+
+    final int psm = _selectedPsm!;
+
+    _log('>>> USER TAPPED: Close L2CAP Channel psm=$psm');
 
     try {
       var channel = _activeL2CapChannels[psm];
@@ -309,6 +326,9 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
 
       setState(() {
         _activeL2CapChannels.remove(psm);
+        _l2capReceivedByPsm.remove(psm);
+        // Select another channel if available
+        _selectedPsm = _activeL2CapChannels.keys.isNotEmpty ? _activeL2CapChannels.keys.first : null;
       });
 
       Snackbar.show(ABC.c, "L2CAP channel closed - PSM: $psm", success: true);
@@ -323,19 +343,22 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
     }
   }
 
-  Future onWriteL2CapPressed() async {
-    int psm = int.tryParse(_psmController.text) ?? 1001;
-    String data = _l2capDataController.text;
+  Future _onWriteL2CapPressed() async {
+    if (_selectedPsm == null) {
+      _log('Write not possible, no channel selected. _selectedPsm is null');
+      Snackbar.show(ABC.c, "No channel selected", success: false);
+      return;
+    }
 
+    String data = _l2capDataController.text;
     if (data.isEmpty) {
       Snackbar.show(ABC.c, "Please enter data to send", success: false);
       return;
     }
 
-    if (!_activeL2CapChannels.containsKey(psm)) {
-      Snackbar.show(ABC.c, "No L2CAP channel open for PSM: $psm", success: false);
-      return;
-    }
+    final int psm = _selectedPsm!;
+
+    _log('>>> USER TAPPED: Write to L2CAP Channel psm=$psm data="$data"');
 
     try {
       List<int> bytes = data.codeUnits;
@@ -362,13 +385,15 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
     }
   }
 
-  Future onReadL2CapPressed() async {
-    int psm = int.tryParse(_psmController.text) ?? 1001;
-
-    if (!_activeL2CapChannels.containsKey(psm)) {
-      Snackbar.show(ABC.c, "No L2CAP channel open for PSM: $psm", success: false);
+  Future _onReadL2CapPressed() async {
+    if (_selectedPsm == null) {
+      Snackbar.show(ABC.c, "No channel selected", success: false);
       return;
     }
+
+    final int psm = _selectedPsm!;
+
+    _log('>>> USER TAPPED: Read from L2CAP Channel psm=$psm');
 
     try {
       var channel = _activeL2CapChannels[psm];
@@ -377,14 +402,16 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
         var result = await channel.read();
         receivedData = String.fromCharCodes(result);
       } else {
-        // For demo purposes, simulate received data
         receivedData = "Sample L2CAP data received at ${DateTime.now().toIso8601String()}";
       }
 
       setState(() {
-        _l2capReceivedList.insert(0, receivedData);
-        if (_l2capReceivedList.length > 200) {
-          _l2capReceivedList.removeRange(200, _l2capReceivedList.length);
+        if (!_l2capReceivedByPsm.containsKey(psm)) {
+          _l2capReceivedByPsm[psm] = [];
+        }
+        _l2capReceivedByPsm[psm]!.insert(0, receivedData);
+        if (_l2capReceivedByPsm[psm]!.length > 200) {
+          _l2capReceivedByPsm[psm]!.removeRange(200, _l2capReceivedByPsm[psm]!.length);
         }
       });
 
@@ -416,60 +443,64 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
                 'L2CAP',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
+              SizedBox(height: 8.0),
               Row(
-                mainAxisAlignment: MainAxisAlignment.center,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Client'),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12.0),
-                    child: Switch(
-                      value: _isServerMode,
-                      onChanged: (_isListeningL2Cap || _activeL2CapChannels.isNotEmpty)
-                          ? null
-                          : (value) => setState(() {
-                                _isServerMode = value;
-                                // Keep tab on Data by default; do not auto-switch to Logs
-                              }),
+                  CupertinoSegmentedControl<bool>(
+                    padding: EdgeInsets.zero,
+                    groupValue: _l2capSecure,
+                    children: const {
+                      false: _SegmentedControlButton(label: 'Insecure'),
+                      true: _SegmentedControlButton(label: 'Secure'),
+                    },
+                    onValueChanged: (value) => setState(() => _l2capSecure = value),
+                  ),
+                  SizedBox(width: 8.0),
+                  IgnorePointer(
+                    ignoring: _serverPsms.isNotEmpty || _activeL2CapChannels.isNotEmpty,
+                    child: Opacity(
+                      opacity: (_serverPsms.isNotEmpty || _activeL2CapChannels.isNotEmpty) ? 0.5 : 1.0,
+                      child: CupertinoSegmentedControl<bool>(
+                        padding: EdgeInsets.zero,
+                        groupValue: _isServerMode,
+                        children: const {
+                          false: _SegmentedControlButton(label: 'Client'),
+                          true: _SegmentedControlButton(label: 'Server'),
+                        },
+                        onValueChanged: (value) => setState(() {
+                          _isServerMode = value;
+                        }),
+                      ),
                     ),
                   ),
-                  const Text('Server'),
                 ],
               ),
             ],
           ),
         ),
 
-        // PSM Input and Security Toggle
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _psmController,
-                  decoration: InputDecoration(
-                    labelText: _isServerMode ? 'Assigned PSM' : 'PSM (1–65535)',
-                    border: const OutlineInputBorder(),
+        // PSM Input
+        if (_isServerMode)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _psmController,
+                    decoration: InputDecoration(
+                      labelText: _isServerMode ? 'Assigned PSM' : 'PSM (1–65535)',
+                      border: const OutlineInputBorder(),
+                    ),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    enabled: !_isServerMode,
                   ),
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  enabled: !_isServerMode,
                 ),
-              ),
-              const SizedBox(width: 16),
-              Column(
-                children: [
-                  const Text('Secure'),
-                  Switch(
-                    value: _l2capSecure,
-                    onChanged: (value) => setState(() => _l2capSecure = value),
-                  ),
-                ],
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
 
         const SizedBox(height: 16),
 
@@ -504,21 +535,53 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
               children: [
                 // Data tab
                 Builder(builder: (context) {
-                  final bool canSend = _isServerMode ? _isListeningL2Cap : _activeL2CapChannels.isNotEmpty;
+                  final bool canSend = _selectedPsm != null;
+                  final List<String> entries = _selectedPsm != null ? (_l2capReceivedByPsm[_selectedPsm] ?? []) : [];
+
                   return L2CapListSection(
-                    entries: _l2capReceivedList,
-                    title: 'Data Transfer',
+                    entries: entries,
+                    title: _selectedPsm != null ? 'Data Transfer - PSM $_selectedPsm' : 'Data Transfer',
                     actions: [
+                      // PSM Selector Dropdown
+                      if (_activeL2CapChannels.isNotEmpty)
+                        Row(
+                          children: [
+                            Expanded(
+                              child: DropdownButton<int>(
+                                value: _selectedPsm,
+                                isExpanded: true,
+                                hint: const Text('Select Channel (PSM)'),
+                                items: _activeL2CapChannels.keys.map((psm) {
+                                  final isServer = _serverPsms.contains(psm);
+                                  return DropdownMenuItem(
+                                    value: psm,
+                                    child: Text('PSM $psm ${isServer ? "(Server)" : "(Client)"}'),
+                                  );
+                                }).toList(),
+                                onChanged: (psm) {
+                                  _log('>>> USER SELECTED: PSM $psm from dropdown');
+                                  setState(() => _selectedPsm = psm);
+                                },
+                              ),
+                            ),
+                            SizedBox(width: 8),
+                            TextButton(
+                              onPressed: canSend ? _onReadL2CapPressed : null,
+                              child: const Text('Read Data'),
+                            )
+                          ],
+                        ),
+                      const SizedBox(height: 8),
                       if (!canSend)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8.0),
                           child: Text(
-                            _isServerMode ? 'Start the server to enable sending' : 'Open a channel to enable sending',
+                            _isServerMode ? 'Start a server or select a channel' : 'Open a channel to enable sending',
                             style: const TextStyle(color: Colors.grey),
                           ),
                         ),
                       TextField(
-                        onEditingComplete: canSend ? onWriteL2CapPressed : null,
+                        onEditingComplete: canSend ? _onWriteL2CapPressed : null,
                         controller: _l2capDataController,
                         decoration: InputDecoration(
                           labelText: 'Data to send',
@@ -527,7 +590,7 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
                           suffixIcon: Padding(
                             padding: const EdgeInsets.only(right: 8.0),
                             child: IconButton(
-                              onPressed: canSend ? onWriteL2CapPressed : null,
+                              onPressed: canSend ? _onWriteL2CapPressed : null,
                               icon: const Icon(Icons.send, size: 16),
                             ),
                           ),
@@ -536,11 +599,6 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
                         enabled: true,
                       ),
                     ],
-                    topRightWidget: ElevatedButton.icon(
-                      onPressed: onReadL2CapPressed,
-                      icon: const Icon(Icons.download),
-                      label: const Text('Read Data'),
-                    ),
                   );
                 }),
                 // Logs tab
@@ -566,48 +624,58 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('L2CAP Server', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              Text('L2CAP Server', style: Theme.of(context).textTheme.titleMedium),
               ElevatedButton.icon(
-                onPressed: _isListeningL2Cap ? null : onStartL2CapServerPressed,
-                icon: const Icon(Icons.play_arrow),
-                label: const Text('Start Server'),
+                onPressed: onStartL2CapServerPressed,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('New Server'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green,
                   foregroundColor: Colors.white,
-                ),
-              ),
-              const SizedBox(width: 8),
-              ElevatedButton.icon(
-                onPressed: !_isListeningL2Cap ? null : onStopL2CapServerPressed,
-                icon: const Icon(Icons.stop),
-                label: const Text('Stop Server'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 ),
               ),
             ],
           ),
-          if (_isListeningL2Cap)
-            Padding(
-              padding: const EdgeInsets.only(top: 8.0),
+          const SizedBox(height: 8),
+          if (_serverPsms.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8.0),
               child: Text(
-                'Server listening on PSM: $_listeningPsm (${_l2capSecure ? "Secure" : "Insecure"})',
-                style: TextStyle(color: Colors.green[700], fontWeight: FontWeight.bold),
+                'No servers running. Click "New Server" to start.',
+                style: TextStyle(color: Colors.grey),
               ),
-            ),
+            )
+          else
+            ...(_serverPsms.map((psm) => Card(
+                  color: _selectedPsm == psm ? Colors.green[50] : null,
+                  margin: const EdgeInsets.only(bottom: 8.0),
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.wifi_tethering, color: Colors.green[700]),
+                    title: Text('PSM: $psm', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text('${_l2capSecure ? "Secure" : "Insecure"} Server'),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.stop, color: Colors.red),
+                      onPressed: () => onStopL2CapServerPressed(psm),
+                      tooltip: 'Stop Server',
+                    ),
+                    onTap: () {
+                      _log('>>> USER TAPPED: Select server PSM $psm');
+                      setState(() => _selectedPsm = psm);
+                    },
+                  ),
+                ))),
         ],
       ),
     );
   }
 
   Padding _buildL2CapClientControl(BuildContext context) {
-    final int? currentPsm = int.tryParse(_psmController.text);
-
-    final bool canClose = isConnected && currentPsm != null && _activeL2CapChannels.containsKey(currentPsm);
+    final clientChannels = _activeL2CapChannels.entries.where((e) => !_serverPsms.contains(e.key)).toList();
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0),
@@ -618,35 +686,64 @@ class _L2CapSectionState extends State<L2CapSection> with SingleTickerProviderSt
           const SizedBox(height: 8),
           Row(
             children: [
-              ElevatedButton.icon(
-                onPressed: _hasValidPsm ? onConnectL2CapPressed : null,
-                icon: const Icon(Icons.link),
-                label: const Text('Open Channel'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
+              Expanded(
+                child: TextField(
+                  controller: _psmController,
+                  decoration: const InputDecoration(
+                    labelText: 'PSM to connect',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 ),
               ),
               const SizedBox(width: 8),
               ElevatedButton.icon(
-                onPressed: canClose ? onDisconnectL2CapPressed : null,
-                icon: const Icon(Icons.link_off),
-                label: const Text('Close Channel'),
+                onPressed: _hasValidPsm && isConnected ? onConnectL2CapPressed : null,
+                icon: const Icon(Icons.link, size: 18),
+                label: const Text('Open'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
+                  backgroundColor: Colors.blue,
                   foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
                 ),
               ),
             ],
           ),
-          if (_activeL2CapChannels.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8.0),
+          const SizedBox(height: 8),
+          if (clientChannels.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8.0),
               child: Text(
-                'Active channels: ${_activeL2CapChannels.keys.join(", ")}',
-                style: TextStyle(color: Colors.blue[700], fontWeight: FontWeight.bold),
+                'No client channels open. Enter a PSM and click "Open".',
+                style: TextStyle(color: Colors.grey),
               ),
-            ),
+            )
+          else
+            ...(clientChannels.map((entry) => Card(
+                  color: _selectedPsm == entry.key ? Colors.blue[50] : null,
+                  margin: const EdgeInsets.only(bottom: 8.0),
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.link, color: Colors.blue[700]),
+                    title: Text('PSM: ${entry.key}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text('Connected to ${widget.device.remoteId.str.substring(0, 8)}...'),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.close, color: Colors.red),
+                      onPressed: () {
+                        _log('>>> USER TAPPED: Close button on client PSM ${entry.key}');
+                        setState(() => _selectedPsm = entry.key);
+                        onDisconnectL2CapPressed();
+                      },
+                      tooltip: 'Close Channel',
+                    ),
+                    onTap: () {
+                      _log('>>> USER TAPPED: Select client PSM ${entry.key}');
+                      setState(() => _selectedPsm = entry.key);
+                    },
+                  ),
+                ))),
         ],
       ),
     );
@@ -676,26 +773,10 @@ class L2CapListSection extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.list_alt, color: Colors.blue),
-                    const SizedBox(width: 8),
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                  ],
-                ),
-                topRightWidget ?? const SizedBox.shrink(),
-              ],
-            ),
-            const SizedBox(height: 16),
+            if (topRightWidget != null) Align(alignment: Alignment.topRight, child: topRightWidget!),
+            const SizedBox(height: 4),
             if (actions.isNotEmpty) ...actions,
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             Expanded(
               child: Container(
                 padding: const EdgeInsets.all(8.0),
@@ -711,25 +792,44 @@ class L2CapListSection extends StatelessWidget {
                           style: TextStyle(color: Colors.grey),
                         ),
                       )
-                    : ListView.builder(
-                        itemCount: entries.length,
-                        itemBuilder: (context, index) {
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 2.0),
-                            child: Text(
-                              entries[index],
-                              style: const TextStyle(
-                                fontFamily: 'monospace',
-                                fontSize: 12,
+                    : SelectionArea(
+                        child: ListView.builder(
+                          itemCount: entries.length,
+                          itemBuilder: (context, index) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 2.0),
+                              child: Text(
+                                entries[index],
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontSize: 12,
+                                ),
                               ),
-                            ),
-                          );
-                        },
+                            );
+                          },
+                        ),
                       ),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SegmentedControlButton extends StatelessWidget {
+  const _SegmentedControlButton({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+        child: Text(label, style: TextStyle(fontSize: 13)),
       ),
     );
   }

@@ -4,7 +4,7 @@ version '1.0'
 apply plugin: 'com.android.library'
 
 android {
-    compileSdkVersion = flutter.compileSdkVersion
+    compileSdkVersion = 34 // todo fix why flutter.compileSdkVersion is not working
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11

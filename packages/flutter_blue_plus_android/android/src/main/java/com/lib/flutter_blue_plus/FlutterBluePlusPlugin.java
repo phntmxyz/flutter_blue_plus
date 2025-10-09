@@ -3409,7 +3409,9 @@ class L2CapChannelManager {
 
 abstract class L2CapChannel {
 
-    protected static final int DEFAULT_READ_BUFFER_SIZE = 50;
+    // TODO: Find root cause of why 50 bytes is insufficient and implement a more graceful solution
+    // (e.g., dynamic buffer sizing or configurable buffer size). This is a quick fix to make L2CAP work.
+    protected static final int DEFAULT_READ_BUFFER_SIZE = 512;
     protected final byte[] readBuffer;
     protected final FlutterBluePlusPlugin plugin;
     protected BluetoothSocket socket;

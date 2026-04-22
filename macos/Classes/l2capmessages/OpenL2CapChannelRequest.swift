@@ -1,1 +1,0 @@
-../../../ios/Classes/l2capmessages/OpenL2CapChannelRequest.swift

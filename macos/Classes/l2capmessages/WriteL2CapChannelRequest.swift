@@ -1,1 +1,0 @@
-../../../ios/Classes/l2capmessages/WriteL2CapChannelRequest.swift
